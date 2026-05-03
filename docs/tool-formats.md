@@ -62,6 +62,81 @@ parsing is required.
 
 ---
 
+### Devstral / Mistral XML format (user/assistant only — no tool role)
+
+Devstral (Mistral AI) uses a completely different tool-calling contract from both
+the OpenAI JSON format and Qwen's XML format. It operates on **user and assistant
+messages only** — there is no `tool` role in the conversation. Tool definitions go
+into the system prompt as XML, and tool results come back as user messages.
+
+**Why:** Devstral was fine-tuned with this format because it gave better agent
+performance than the standard OpenAI tool_calls approach. See the
+[Mistral blog](https://docs.mistral.ai/mistral-vibe/local) for background.
+
+#### Tool call emitted by Devstral
+
+```
+finish_reason: "stop"   ← always "stop", never "tool_calls"
+content:
+  <tool_call>
+  {"name": "bash", "arguments": {"command": "ls /tmp"}}
+  </tool_call>
+```
+
+The `<tool_call>` block appears in `content` as plain text. There is no
+`tool_calls` array in the response.
+
+#### Full conversation structure
+
+```
+[system]    You are a coding assistant.
+
+            Available tools:
+            <tools>
+            <tool>
+            <name>bash</name>
+            <description>Execute a shell command</description>
+            <parameters_schema>{"type":"object","properties":{"command":{"type":"string"}}}</parameters_schema>
+            </tool>
+            </tools>
+
+            When you need to call a tool, output ONLY:
+            <tool_call>
+            {"name": "tool_name", "arguments": {"arg": "value"}}
+            </tool_call>
+
+[user]      list files in /tmp
+
+[assistant] <tool_call>
+            {"name": "bash", "arguments": {"command": "ls /tmp"}}
+            </tool_call>
+
+[user]      <tool_results>
+            [{"name": "bash", "output": "file1.txt\nfile2.txt\n"}]
+            </tool_results>
+
+[assistant] The directory contains: file1.txt, file2.txt.
+```
+
+Key differences from OpenAI format:
+
+| Property | OpenAI format | Devstral XML format |
+|---|---|---|
+| Tool defs location | API `tools` field | System prompt (`<tools>` XML) |
+| Tool call location | `message.tool_calls` array | `message.content` text |
+| finish_reason | `"tool_calls"` | `"stop"` |
+| Tool result role | `"tool"` | `"user"` |
+| Tool result format | `{"role":"tool","content":"..."}` | `<tool_results>[{"name":"...","output":"..."}]</tool_results>` |
+
+#### llmctl handling
+
+When the configured model alias contains `devstral` or `mistral`, llmctl:
+- Skips `tool_choice` injection (irrelevant to this format)
+- Clients using llmctl's proxy should embed tool definitions in the system prompt
+  and send only user/assistant messages
+
+---
+
 ### Qwen XML format (requires client-side parsing)
 
 Qwen models emit tool calls inline with the response text using an XML envelope.

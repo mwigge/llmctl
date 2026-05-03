@@ -43,16 +43,21 @@ type routerHandler struct {
 
 func (h *routerHandler) handleChatCompletions(w http.ResponseWriter, req *http.Request) {
 	target := h.routeTarget(req)
-	req = injectToolChoice(req)
+	req = injectToolChoice(req, h.cfg)
 	proxyRequest(w, req, target)
 }
 
 // injectToolChoice reads the request body and, when the JSON payload contains a
 // non-empty "tools" array and no "tool_choice" field, sets tool_choice to "auto".
 // This is required for backends that ignore tools when tool_choice is absent.
+//
+// XML-tool-calling models (Devstral, Mistral-family) do not use the OpenAI
+// tool_choice field — they call tools via <tool_call> XML in content. For those
+// models the injection is skipped to avoid confusing the backend.
+//
 // The function always returns a valid request; on any JSON parse error it returns
 // the original request unchanged.
-func injectToolChoice(req *http.Request) *http.Request {
+func injectToolChoice(req *http.Request, cfg *config.Config) *http.Request {
 	if req.Body == nil {
 		return req
 	}
@@ -75,13 +80,20 @@ func injectToolChoice(req *http.Request) *http.Request {
 	if !hasTools {
 		return req
 	}
-	var tools []json.RawMessage
-	if err := json.Unmarshal(toolsRaw, &tools); err != nil || len(tools) == 0 {
+	var toolsList []json.RawMessage
+	if err := json.Unmarshal(toolsRaw, &toolsList); err != nil || len(toolsList) == 0 {
 		return req
 	}
 
 	// Only inject when "tool_choice" is absent.
 	if _, hasChoice := payload["tool_choice"]; hasChoice {
+		return req
+	}
+
+	// Skip injection for XML-tool-calling models (Devstral/Mistral).
+	// The model field in the request, or the configured model alias, tells us
+	// which format the backend expects.
+	if isXMLToolModel(payload, cfg) {
 		return req
 	}
 
@@ -94,6 +106,29 @@ func injectToolChoice(req *http.Request) *http.Request {
 	req.Body = io.NopCloser(bytes.NewReader(modified))
 	req.ContentLength = int64(len(modified))
 	return req
+}
+
+// isXMLToolModel returns true when the request targets a model that uses XML
+// tool calling rather than the OpenAI tool_calls JSON format.
+func isXMLToolModel(payload map[string]json.RawMessage, cfg *config.Config) bool {
+	// Check explicit model field in the request payload.
+	if raw, ok := payload["model"]; ok {
+		var name string
+		if json.Unmarshal(raw, &name) == nil {
+			lower := strings.ToLower(name)
+			if strings.Contains(lower, "devstral") || strings.Contains(lower, "mistral") {
+				return true
+			}
+		}
+	}
+	// Fall back to configured model aliases.
+	for _, m := range cfg.Models {
+		lower := strings.ToLower(m.Alias)
+		if strings.Contains(lower, "devstral") || strings.Contains(lower, "mistral") {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *routerHandler) handlePassthrough(w http.ResponseWriter, req *http.Request) {

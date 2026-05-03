@@ -21,14 +21,13 @@ type CatalogEntry struct {
 // uses a different format (e.g. Qwen XML) that requires client-side translation.
 var BuiltinCatalog = []CatalogEntry{
 	{
-		Name:          "Devstral-Small",
-		Repo:          "unsloth/Devstral-Small-2505-GGUF",
-		Quant:         "Q4_K_M",
-		SizeGB:        "12GB",
-		MinRAMGB:      16,
-		ToolUse:       true,
-		OpenAIToolFmt: true,
-		Description:   "Default. EU-developed (Mistral AI, France). Apache 2.0. Native OpenAI tool_calls JSON. Top SWE-bench score in class. Requires --jinja.",
+		Name:        "Devstral-Small",
+		Repo:        "unsloth/Devstral-Small-2505-GGUF",
+		Quant:       "Q4_K_M",
+		SizeGB:      "12GB",
+		MinRAMGB:    16,
+		ToolUse:     true,
+		Description: "Default. EU-developed (Mistral AI, France). Apache 2.0. XML tool calling (user/assistant only — tool defs in system prompt, results as user messages). Top SWE-bench score in class.",
 	},
 	{
 		Name:          "Hermes-3-Llama-3.1-8B",
