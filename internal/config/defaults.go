@@ -5,6 +5,12 @@ package config
 func DefaultConfig() *Config {
 	return &Config{
 		Mode: "single",
+		// Default to the 7B coder model — large enough for reliable tool use,
+		// small enough for 8GB machines. Path is empty until installed via
+		// llmctl model install Qwen2.5-Coder-7B.
+		Models: []ModelRef{
+			{Alias: "qwen2.5-coder-7b", Path: "", Role: "code"},
+		},
 		Server: ServerCfg{
 			Host:      "127.0.0.1",
 			Port:      8765,

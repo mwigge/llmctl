@@ -36,7 +36,18 @@ func pidFilePath() (string, error) {
 }
 
 // Start finds the llama-server binary, builds argv from config, and launches the process.
+// If a server is already reachable on the configured port, Start returns nil immediately
+// rather than fighting over the port — this prevents port-jumping when the server is
+// already running and the user runs `llmctl server start` again.
 func (m *singleManager) Start(ctx context.Context) error {
+	endpoint := fmt.Sprintf("http://%s:%d/v1/models", m.cfg.Server.Host, m.cfg.Server.Port)
+	client := &http.Client{Timeout: 2 * time.Second}
+	if resp, err := client.Get(endpoint); err == nil {
+		resp.Body.Close()
+		// Something is already listening and answering — treat as already started.
+		return nil
+	}
+
 	bin, err := FindLlamaServer()
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
