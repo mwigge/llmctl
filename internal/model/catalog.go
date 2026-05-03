@@ -4,18 +4,42 @@ import "strings"
 
 // CatalogEntry describes a curated GGUF model available for download.
 type CatalogEntry struct {
-	Name        string
-	Repo        string // HuggingFace repo: owner/name
-	Quant       string // e.g. Q4_K_M, Q8_0
-	SizeGB      string
-	MinRAMGB    int
-	ToolUse     bool
-	Reasoning   bool
-	Description string
+	Name           string
+	Repo           string // HuggingFace repo: owner/name
+	Quant          string // e.g. Q4_K_M, Q8_0
+	SizeGB         string
+	MinRAMGB       int
+	ToolUse        bool
+	Reasoning      bool
+	OpenAIToolFmt  bool   // true = emits OpenAI tool_calls JSON; false = XML/other format (needs client-side parsing)
+	Description    string
 }
 
 // BuiltinCatalog is the curated list of well-known GGUF models.
+// OpenAIToolFmt=true means the model natively emits tool_calls JSON compatible
+// with the OpenAI Chat Completions protocol. OpenAIToolFmt=false means the model
+// uses a different format (e.g. Qwen XML) that requires client-side translation.
 var BuiltinCatalog = []CatalogEntry{
+	{
+		Name:          "Hermes-3-Llama-3.1-8B",
+		Repo:          "NousResearch/Hermes-3-Llama-3.1-8B-GGUF",
+		Quant:         "Q4_K_M",
+		SizeGB:        "4.9GB",
+		MinRAMGB:      8,
+		ToolUse:       true,
+		OpenAIToolFmt: true,
+		Description:   "Best agentic model: natively emits OpenAI tool_calls JSON. Excellent for coding + file writes.",
+	},
+	{
+		Name:          "Llama-3.1-8B",
+		Repo:          "unsloth/Meta-Llama-3.1-8B-Instruct-GGUF",
+		Quant:         "Q4_K_M",
+		SizeGB:        "4.9GB",
+		MinRAMGB:      8,
+		ToolUse:       true,
+		OpenAIToolFmt: true,
+		Description:   "Native OpenAI tool_calls format. Reliable for agentic coding tasks.",
+	},
 	{
 		Name:        "Qwen2.5-Coder-7B",
 		Repo:        "unsloth/Qwen2.5-Coder-7B-Instruct-GGUF",
@@ -23,7 +47,7 @@ var BuiltinCatalog = []CatalogEntry{
 		SizeGB:      "4.7GB",
 		MinRAMGB:    6,
 		ToolUse:     true,
-		Description: "Fast 7B coding model with tool-use support",
+		Description: "Fast 7B coding model. Uses XML tool format (client translates to OpenAI).",
 	},
 	{
 		Name:        "Qwen2.5-Coder-14B",
