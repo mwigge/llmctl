@@ -260,6 +260,7 @@ See [docs/models.md](docs/models.md) for the full catalog and RAM requirements.
 
 | Doc | Contents |
 |---|---|
+| [docs/hardware.md](docs/hardware.md) | Hardware deployment guide — VM, Docker, laptop, H100 server comparison |
 | [docs/local-server.md](docs/local-server.md) | Deployment modes, systemd, ports, monitoring |
 | [docs/models.md](docs/models.md) | GGUF format, model selection |
 | [docs/quantisation.md](docs/quantisation.md) | Quantisation levels, Unsloth, how to choose Q4_K_M vs Q8_0 |
