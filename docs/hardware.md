@@ -324,112 +324,97 @@ Usable for layers: 7168 MB / 160 MB = ~44 layers → --n-gpu-layers 40 (partial)
 
 ---
 
-## Devstral on Apple Silicon vs RTX 3080 8 GB — a direct comparison
+## Three-way comparison: M5 Pro 24 GB, M1 Pro 16 GB, RTX 3080 8 GB
 
-This section uses real measured figures from an Apple M5 Pro 24 GB running Devstral-Small
-Q4_K_M, compared against expected figures for the same model on a laptop RTX 3080 8 GB.
+A fair comparison runs the **same model** on all three machines. Hermes-3-Llama-3.1-8B
+Q4_K_M (4.9 GB) fits fully inside the GPU memory of all three — no hybrid mode, no swap,
+no PCIe bottleneck. Devstral (13 GB) is also shown to illustrate what happens when a model
+exceeds what a machine can hold natively.
 
-### Why these two are not an even match for Devstral
+### Memory fit at a glance
 
-The RTX 3080 laptop has 8 GB GDDR6X VRAM. Devstral-Small Q4_K_M is **12 GB**. It does not
-fit. You are forced into hybrid mode: some layers on GPU, the rest on CPU, with the PCIe bus
-carrying data across the boundary on every forward pass.
+| Machine | GPU memory | Hermes-3 (4.9 GB) | Devstral (13 GB) |
+|---|---|---|---|
+| RTX 3080 8 GB | 8 GB GDDR6X | ✅ Fully in VRAM (3 GB spare) | ❌ Hybrid — 20 layers on CPU |
+| M1 Pro 16 GB | 16 GB unified (~12 GB working set) | ✅ Fully on Metal (7 GB spare) | ❌ Exceeds working set — macOS swap |
+| M5 Pro 24 GB | 24 GB unified (18.2 GB available) | ✅ Fully on Metal (13 GB spare) | ✅ Fully on Metal (5 GB spare) |
 
-The M5 Pro 24 GB uses **unified memory** — there is one physical memory pool shared between
-the CPU and the GPU. The GPU can read model weights directly at full memory bandwidth with
-no copy and no bus overhead.
+### Hermes-3 8B Q4_K_M — all three machines (same model, fair comparison)
 
-### Memory architecture
+| | RTX 3080 8 GB | M1 Pro 16 GB | M5 Pro 24 GB |
+|---|---|---|---|
+| Backend | CUDA (full VRAM) | Metal Apple7 | Metal Apple10 |
+| Memory bandwidth | **448 GB/s** GDDR6X | 200 GB/s | ~300 GB/s |
+| All layers on GPU | ✅ Yes | ✅ Yes | ✅ Yes |
+| Token generation | **~50–70 t/s** | ~30–40 t/s | ~55–75 t/s |
+| Prompt prefill | ~150–250 t/s | ~100–160 t/s | ~200–350 t/s |
+| Power draw | ~150–200 W | ~15–20 W | ~30–40 W |
+| Power per token | ~2–4 W·s | **~0.5 W·s** | **~0.5 W·s** |
+
+**The 3080 8 GB is fast** — GDDR6X has 448 GB/s bandwidth which is 1.5× the M5 Pro's
+unified memory bandwidth. When Hermes-3 fits fully in VRAM, the 3080 is broadly competitive
+with the M5 Pro and noticeably faster than the M1 Pro.
+
+### Devstral — only machines where it fits natively
+
+Running Devstral on the 3080 or M1 Pro 16 GB degrades to a different operating mode
+(hybrid / SSD swap) that cannot be compared directly to a native fit.
+
+| | M5 Pro 24 GB | RTX 3080 8 GB | M1 Pro 16 GB |
+|---|---|---|---|
+| Devstral fits natively | ✅ Yes | ❌ Hybrid | ❌ macOS swap |
+| Token generation | **52–57 t/s** (measured) | ~12–18 t/s | ~3–10 t/s |
+| Why slower | — | PCIe bus bottleneck | SSD swap bottleneck |
+
+### Memory architecture: why VRAM bandwidth doesn't always win
 
 ```
-RTX 3080 laptop (8 GB VRAM)                 Apple M5 Pro (24 GB unified)
+RTX 3080 (Hermes-3 fully in VRAM)      M5 Pro (Hermes-3 fully in unified memory)
 
-┌──────────────────────────────────┐         ┌─────────────────────────────────────┐
-│  CPU (DDR5, ~80 GB/s)            │         │  Unified memory pool (24 GB)        │
-│  ┌────────────────────────────┐  │         │  ┌──────────────────────────────┐   │
-│  │  Devstral layers 21–40     │  │         │  │  All Devstral layers (1–40)  │   │
-│  │  CPU RAM ~7 GB             │  │         │  │  13 GB model weights         │   │
-│  └────────┬───────────────────┘  │         │  │  KV cache                    │   │
-│           │ PCIe 4.0 x16         │         │  └────────────┬─────────────────┘   │
-│           │ ~32 GB/s one-way     │         │               │ ~273 GB/s           │
-│           ▼                      │         │               ▼                     │
-│  GPU (GDDR6X, 448 GB/s)          │         │  Metal GPU (20 cores)               │
-│  ┌────────────────────────────┐  │         │  ┌──────────────────────────────┐   │
-│  │  Devstral layers 1–20      │  │         │  │  Reads weights from same     │   │
-│  │  VRAM ~5-6 GB              │  │         │  │  physical memory, no copy    │   │
-│  └────────────────────────────┘  │         │  └──────────────────────────────┘   │
-└──────────────────────────────────┘         └─────────────────────────────────────┘
+GPU ←──── 448 GB/s ────→ GDDR6X        GPU ←──── 300 GB/s ────→ unified pool
+           (model lives here)                      (model lives here)
+             no PCIe needed                          no PCIe needed
 
-  Every token crosses PCIe twice per turn         No bus, no copy, no bottleneck
+Both are bottlenecked only by memory bandwidth. No CPU-GPU transfer.
+3080 has more raw bandwidth → comparable or faster on same-size model.
 ```
 
-### Measured figures — M5 Pro 24 GB
+When Devstral is forced onto the 3080 in hybrid mode, the architecture changes:
 
-These numbers come from llama-server logs with Devstral-Small Q4_K_M at ctx 32768,
-Metal backend, `--jinja -fa on`:
+```
+RTX 3080 (Devstral, hybrid)
 
-| Metric | M5 Pro 24 GB |
-|---|---|
-| Backend | Metal (MTLGPUFamilyApple10) |
-| GPU working set available | 18.2 GB |
-| Model fully on GPU? | **Yes** — all 40 layers |
-| Prompt processing (prefill) | **235–387 tokens/s** |
-| Token generation | **52–57 tokens/s** |
-| KV cache (32K ctx) | 448 MB on Metal |
-| Compute buffer | 300 MB |
-| Power draw (full load) | ~35–45 W |
+CPU RAM ←──── 80 GB/s ──── DDR5 (layers 21-40, ~7 GB)
+    │
+    │ PCIe 4.0 x16 — 32 GB/s one-way   ← THIS is now the ceiling
+    ▼
+GPU VRAM (layers 1-20, ~6 GB) ←──── 448 GB/s ──── GDDR6X
+```
 
-### Estimated figures — RTX 3080 laptop 8 GB
+The 3080's 448 GB/s advantage is irrelevant once PCIe becomes the bottleneck.
 
-Devstral Q4_K_M in hybrid mode (~20 GPU layers, ~20 CPU layers):
+### Summary
 
-| Metric | RTX 3080 8 GB laptop |
-|---|---|
-| Backend | CUDA (partial) + CPU |
-| VRAM used | ~6 GB (layers 1–20) |
-| Model fully on GPU? | **No** — ~20 layers on CPU RAM |
-| Prompt processing (prefill) | ~50–80 tokens/s |
-| Token generation | **~12–18 tokens/s** |
-| PCIe bottleneck per token | Yes — 32 GB/s, bidirectional |
-| Power draw (full load) | ~180–230 W |
-
-### Head-to-head summary
-
-| | M5 Pro 24 GB | RTX 3080 laptop 8 GB |
-|---|---|---|
-| Devstral fits in GPU memory | ✅ Yes (13 GB < 18.2 GB available) | ❌ No (13 GB > 8 GB VRAM) |
-| Inference mode | Full Metal offload | Hybrid CPU+GPU |
-| Generation speed | **52–57 t/s** (measured) | ~12–18 t/s (estimated) |
-| Prefill speed | **235–387 t/s** (measured) | ~50–80 t/s (estimated) |
-| Bottleneck | Memory bandwidth (273 GB/s) | PCIe bus (32 GB/s) |
-| ctx 32768 comfortable? | ✅ Yes | ✅ Yes (CPU RAM absorbs it) |
-| ctx 65536 comfortable? | ✅ Yes (fits in 24 GB) | ✅ Yes (uses more CPU RAM) |
-| Power per token | **~0.7 W·s** | ~12–19 W·s |
-| Verdict for Devstral | **Best match** | Works, 3–4× slower |
-
-### Takeaway
-
-The RTX 3080 8 GB is a capable GPU — it is simply the wrong VRAM size for Devstral.
-If you are on a 3080 8 GB laptop and want competitive Devstral performance, the only
-option is to upgrade to a card with at least 16 GB VRAM (RTX 4090 laptop, RTX 5070 Ti
-desktop) or switch to a model that fully fits in 8 GB (Hermes-3 8B, Qwen3-8B).
-
-The M5 Pro 24 GB wins on Devstral specifically because unified memory eliminates the
-VRAM ceiling — the model fits, all layers run on the GPU, and there is no PCIe penalty.
-The efficiency advantage (≈15× fewer watt-seconds per token) makes it the better choice
-for all-day development use.
+- **Same-size model, all three machines**: 3080 8 GB ≈ M5 Pro 24 GB >> M1 Pro 16 GB.
+  The 3080's GDDR6X bandwidth makes it competitive when the model fits.
+- **Devstral specifically**: M5 Pro 24 GB wins by a wide margin, because it is the only
+  machine where Devstral fits natively without a bus or swap penalty.
+- **Power efficiency**: Both Apple Silicon machines are ~4–6× more power-efficient per
+  token than the 3080, which matters for all-day development use.
+- **Practical choice**: if you only have 8 GB VRAM, run Hermes-3 — it is fast and fully
+  capable for agentic tool use. Upgrade to 16 GB VRAM or 24 GB+ unified memory only if
+  you specifically need Devstral's extra quality.
 
 ```bash
-# M5 Pro — optimal config (already the default)
+# 3080 8 GB or M1 Pro 16 GB — correct model choice
+llmctl model install Hermes-3-Llama-3.1-8B
 llmctl config set server.gpu_layers 99
 llmctl config set server.ctx_size 32768
 
-# 3080 8 GB — best partial-offload config for Devstral
-llmctl config set server.gpu_layers 20
-llmctl config set server.ctx_size 32768
-# or switch to a model that fits fully in 8 GB
-llmctl model install Hermes-3-Llama-3.1-8B
+# M5 Pro 24 GB — run Devstral natively (default)
+llmctl model install Devstral-Small
 llmctl config set server.gpu_layers 99
+llmctl config set server.ctx_size 32768
 ```
 
 ---
