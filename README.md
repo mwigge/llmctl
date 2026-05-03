@@ -261,7 +261,8 @@ See [docs/models.md](docs/models.md) for the full catalog and RAM requirements.
 | Doc | Contents |
 |---|---|
 | [docs/local-server.md](docs/local-server.md) | Deployment modes, systemd, ports, monitoring |
-| [docs/models.md](docs/models.md) | GGUF format, quantisation, model selection |
+| [docs/models.md](docs/models.md) | GGUF format, model selection |
+| [docs/quantisation.md](docs/quantisation.md) | Quantisation levels, Unsloth, how to choose Q4_K_M vs Q8_0 |
 | [docs/tool-formats.md](docs/tool-formats.md) | OpenAI vs XML tool call formats — how to pick a model for agentic use |
 | [docs/temperature.md](docs/temperature.md) | Sampling parameters: temperature, top-p, top-k |
 | [docs/tuning.md](docs/tuning.md) | Performance tuning: threads, GPU layers, batch size |
