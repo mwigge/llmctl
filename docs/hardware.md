@@ -324,94 +324,116 @@ Usable for layers: 7168 MB / 160 MB = ~44 layers → --n-gpu-layers 40 (partial)
 
 ---
 
-## Three-way comparison: M5 Pro 24 GB, M1 Pro 16 GB, RTX 3080 8 GB
+## Four-way comparison: M5 Pro 24 GB, M1 Pro 16 GB, RTX 3080 8 GB, RTX 4060 8 GB
 
-A fair comparison runs the **same model** on all three machines. Hermes-3-Llama-3.1-8B
-Q4_K_M (4.9 GB) fits fully inside the GPU memory of all three — no hybrid mode, no swap,
+A fair comparison runs the **same model** on all four machines. Hermes-3-Llama-3.1-8B
+Q4_K_M (4.9 GB) fits fully inside the GPU memory of all four — no hybrid mode, no swap,
 no PCIe bottleneck. Devstral (13 GB) is also shown to illustrate what happens when a model
 exceeds what a machine can hold natively.
+
+### RTX 4060 vs RTX 3080 — same VRAM, very different bandwidth
+
+This is the counter-intuitive result: the 4060 is a newer architecture (Ada Lovelace, 2023)
+but is significantly **slower** than the 3080 (Ampere, 2021) for LLM inference. The reason
+is the memory bus — NVIDIA narrowed it by half on the budget tier.
+
+| | RTX 3080 laptop 8 GB | RTX 4060 laptop 8 GB |
+|---|---|---|
+| Architecture | Ampere (GA104) | Ada Lovelace (AD107) |
+| VRAM type | **GDDR6X** | GDDR6 |
+| Memory bus | **256-bit** | **128-bit** |
+| Memory bandwidth | **448 GB/s** | **272 GB/s** |
+| TDP range | 80–150 W | 35–115 W |
+| VRAM capacity | 8 GB | 8 GB |
+
+For gaming (DLSS 3, shader throughput, rasterisation), the 4060 is competitive because
+its Ada compute units and DLSS 3 frame generation compensate. For LLM inference — which is
+purely **memory bandwidth bound** — there is no such compensation. Weight loading speed is
+directly proportional to bandwidth.
+
+```
+Inference bottleneck =  model_size_bytes / memory_bandwidth
+
+Hermes-3 (4.9 GB) on 3080:  4.9 GB / 448 GB/s ≈ 11 ms/token → ~70–90 t/s theoretical
+Hermes-3 (4.9 GB) on 4060:  4.9 GB / 272 GB/s ≈ 18 ms/token → ~45–55 t/s theoretical
+```
+
+Real throughput is lower due to compute overhead, but the ratio holds.
 
 ### Memory fit at a glance
 
 | Machine | GPU memory | Hermes-3 (4.9 GB) | Devstral (13 GB) |
 |---|---|---|---|
-| RTX 3080 8 GB | 8 GB GDDR6X | ✅ Fully in VRAM (3 GB spare) | ❌ Hybrid — 20 layers on CPU |
-| M1 Pro 16 GB | 16 GB unified (~12 GB working set) | ✅ Fully on Metal (7 GB spare) | ❌ Exceeds working set — macOS swap |
-| M5 Pro 24 GB | 24 GB unified (18.2 GB available) | ✅ Fully on Metal (13 GB spare) | ✅ Fully on Metal (5 GB spare) |
+| RTX 3080 8 GB | 8 GB GDDR6X (448 GB/s) | ✅ Fully in VRAM | ❌ Hybrid — 20 layers on CPU |
+| RTX 4060 8 GB | 8 GB GDDR6 (272 GB/s) | ✅ Fully in VRAM | ❌ Hybrid — 20 layers on CPU |
+| M1 Pro 16 GB | 16 GB unified (~12 GB working set, 200 GB/s) | ✅ Fully on Metal | ❌ Exceeds working set |
+| M5 Pro 24 GB | 24 GB unified (18.2 GB available, ~300 GB/s) | ✅ Fully on Metal | ✅ Fully on Metal |
 
-### Hermes-3 8B Q4_K_M — all three machines (same model, fair comparison)
+### Hermes-3 8B Q4_K_M — all four machines (same model, fair comparison)
 
-| | RTX 3080 8 GB | M1 Pro 16 GB | M5 Pro 24 GB |
-|---|---|---|---|
-| Backend | CUDA (full VRAM) | Metal Apple7 | Metal Apple10 |
-| Memory bandwidth | **448 GB/s** GDDR6X | 200 GB/s | ~300 GB/s |
-| All layers on GPU | ✅ Yes | ✅ Yes | ✅ Yes |
-| Token generation | **~50–70 t/s** | ~30–40 t/s | ~55–75 t/s |
-| Prompt prefill | ~150–250 t/s | ~100–160 t/s | ~200–350 t/s |
-| Power draw | ~150–200 W | ~15–20 W | ~30–40 W |
-| Power per token | ~2–4 W·s | **~0.5 W·s** | **~0.5 W·s** |
+| | RTX 3080 8 GB | RTX 4060 8 GB | M1 Pro 16 GB | M5 Pro 24 GB |
+|---|---|---|---|---|
+| Backend | CUDA | CUDA | Metal Apple7 | Metal Apple10 |
+| Memory bandwidth | **448 GB/s** | 272 GB/s | 200 GB/s | ~300 GB/s |
+| All layers on GPU | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| Token generation | **~50–70 t/s** | ~30–45 t/s | ~30–40 t/s | ~55–75 t/s |
+| Prompt prefill | ~150–250 t/s | ~100–160 t/s | ~100–160 t/s | ~200–350 t/s |
+| Power draw | ~150–200 W | ~70–110 W | ~15–20 W | ~30–40 W |
+| Power per token | ~2–4 W·s | ~1.5–3.5 W·s | **~0.5 W·s** | **~0.5 W·s** |
 
-**The 3080 8 GB is fast** — GDDR6X has 448 GB/s bandwidth which is 1.5× the M5 Pro's
-unified memory bandwidth. When Hermes-3 fits fully in VRAM, the 3080 is broadly competitive
-with the M5 Pro and noticeably faster than the M1 Pro.
+Key result: the **4060 and M1 Pro land in the same tier** (~30–45 t/s) despite being
+completely different architectures. The 3080 is faster than both on Hermes-3 purely
+because of its wider memory bus.
 
-### Devstral — only machines where it fits natively
+### Devstral — only the M5 Pro fits natively
 
-Running Devstral on the 3080 or M1 Pro 16 GB degrades to a different operating mode
-(hybrid / SSD swap) that cannot be compared directly to a native fit.
+All three 8 GB VRAM and 16 GB unified machines fall back to a slower operating mode.
 
-| | M5 Pro 24 GB | RTX 3080 8 GB | M1 Pro 16 GB |
-|---|---|---|---|
-| Devstral fits natively | ✅ Yes | ❌ Hybrid | ❌ macOS swap |
-| Token generation | **52–57 t/s** (measured) | ~12–18 t/s | ~3–10 t/s |
-| Why slower | — | PCIe bus bottleneck | SSD swap bottleneck |
+| | M5 Pro 24 GB | RTX 3080 8 GB | RTX 4060 8 GB | M1 Pro 16 GB |
+|---|---|---|---|---|
+| Devstral fits natively | ✅ Yes | ❌ Hybrid | ❌ Hybrid | ❌ macOS swap |
+| Token generation | **52–57 t/s** (measured) | ~12–18 t/s | ~12–18 t/s | ~3–10 t/s |
+| Bottleneck | — | PCIe 32 GB/s | PCIe 32 GB/s | SSD swap |
 
-### Memory architecture: why VRAM bandwidth doesn't always win
+Both 3080 and 4060 are **equal** in Devstral hybrid mode because the bottleneck shifts
+from VRAM bandwidth to PCIe bandwidth — and both cards use PCIe 4.0 x16 (32 GB/s).
 
-```
-RTX 3080 (Hermes-3 fully in VRAM)      M5 Pro (Hermes-3 fully in unified memory)
-
-GPU ←──── 448 GB/s ────→ GDDR6X        GPU ←──── 300 GB/s ────→ unified pool
-           (model lives here)                      (model lives here)
-             no PCIe needed                          no PCIe needed
-
-Both are bottlenecked only by memory bandwidth. No CPU-GPU transfer.
-3080 has more raw bandwidth → comparable or faster on same-size model.
-```
-
-When Devstral is forced onto the 3080 in hybrid mode, the architecture changes:
+### Architecture diagram
 
 ```
-RTX 3080 (Devstral, hybrid)
+  Memory bandwidth (GB/s) — higher = faster for inference
 
-CPU RAM ←──── 80 GB/s ──── DDR5 (layers 21-40, ~7 GB)
-    │
-    │ PCIe 4.0 x16 — 32 GB/s one-way   ← THIS is now the ceiling
-    ▼
-GPU VRAM (layers 1-20, ~6 GB) ←──── 448 GB/s ──── GDDR6X
+  448 │  ███ RTX 3080 8 GB (GDDR6X, 256-bit)
+      │
+  300 │      ████████ M5 Pro 24 GB (unified)
+      │
+  272 │          ██████ RTX 4060 8 GB (GDDR6, 128-bit)
+      │
+  200 │               ████████ M1 Pro 16 GB (unified)
+      │
+    0 └──────────────────────────────────────────────
+
+  For LLM inference: bandwidth ≈ tokens/s (when model fits in GPU memory)
+  For Devstral on 8 GB VRAM: all GPU bandwidth is irrelevant — PCIe (32 GB/s) wins
 ```
-
-The 3080's 448 GB/s advantage is irrelevant once PCIe becomes the bottleneck.
 
 ### Summary
 
-- **Same-size model, all three machines**: 3080 8 GB ≈ M5 Pro 24 GB >> M1 Pro 16 GB.
-  The 3080's GDDR6X bandwidth makes it competitive when the model fits.
-- **Devstral specifically**: M5 Pro 24 GB wins by a wide margin, because it is the only
-  machine where Devstral fits natively without a bus or swap penalty.
-- **Power efficiency**: Both Apple Silicon machines are ~4–6× more power-efficient per
-  token than the 3080, which matters for all-day development use.
-- **Practical choice**: if you only have 8 GB VRAM, run Hermes-3 — it is fast and fully
-  capable for agentic tool use. Upgrade to 16 GB VRAM or 24 GB+ unified memory only if
-  you specifically need Devstral's extra quality.
+- **3080 vs 4060 (same model)**: 3080 is ~40–60% faster. Newer generation does not mean
+  faster for inference — the 128-bit bus on the 4060 is a real handicap.
+- **4060 vs M1 Pro**: roughly equal throughput on Hermes-3. The 4060 uses 3–5× more power.
+- **Devstral on any 8 GB VRAM card**: 3080 and 4060 are identical — both hit the PCIe ceiling.
+- **M5 Pro 24 GB**: the only laptop-class machine where both Devstral and speed are possible together.
+- **Choosing between 3080 and 4060 for local LLM use**: the 3080 is the better inference card.
+  The 4060's advantages (DLSS 3, lower TDP) are irrelevant to this workload.
 
 ```bash
-# 3080 8 GB or M1 Pro 16 GB — correct model choice
+# 3080, 4060, or M1 Pro 16 GB — use Hermes-3
 llmctl model install Hermes-3-Llama-3.1-8B
 llmctl config set server.gpu_layers 99
 llmctl config set server.ctx_size 32768
 
-# M5 Pro 24 GB — run Devstral natively (default)
+# M5 Pro 24 GB — run Devstral natively
 llmctl model install Devstral-Small
 llmctl config set server.gpu_layers 99
 llmctl config set server.ctx_size 32768
