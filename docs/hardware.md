@@ -428,7 +428,7 @@ from VRAM bandwidth to PCIe bandwidth — and both cards use PCIe 4.0 x16 (32 GB
   The 4060's advantages (DLSS 3, lower TDP) are irrelevant to this workload.
 
 ```bash
-# 3080, 4060, or M1 Pro 16 GB — use Hermes-3
+# 3080, 4060, 4070, or M1 Pro 16 GB — use Hermes-3
 llmctl model install Hermes-3-Llama-3.1-8B
 llmctl config set server.gpu_layers 99
 llmctl config set server.ctx_size 32768
@@ -438,6 +438,84 @@ llmctl model install Devstral-Small
 llmctl config set server.gpu_layers 99
 llmctl config set server.ctx_size 32768
 ```
+
+---
+
+## RTX 4070 laptop and AMD alternatives — full bandwidth map
+
+### The RTX 4070 laptop trap
+
+The 4070 laptop sounds like a step up from the 4060. For inference it is not — it is
+actually marginally *slower*, because both use the same 128-bit GDDR6 bus but the 4070
+runs it at a lower clock.
+
+| GPU | Chip | Bus | VRAM type | Bandwidth | vs 3080 |
+|---|---|---|---|---|---|
+| RTX 3080 laptop 8 GB | GA104 | 256-bit | GDDR6X | **448 GB/s** | reference |
+| RTX 4060 laptop 8 GB | AD107 | 128-bit | GDDR6 | 272 GB/s | -39% |
+| RTX 4070 laptop 8 GB | AD106 | 128-bit | GDDR6 | **256 GB/s** | **-43%** ← slower than 4060 |
+| RTX 4070 Ti laptop 16 GB | AD104 | 256-bit | GDDR6 | 432 GB/s | -4% |
+| RTX 4080 laptop 12 GB | AD104 | 192-bit | GDDR6X | 432 GB/s | -4% |
+| RTX 4090 laptop 16 GB | AD103 | 256-bit | GDDR6 | 576 GB/s | +29% |
+
+The 4070 laptop uses a lower memory clock than the 4060 (16 Gbps vs 17 Gbps per pin) on
+the same 128-bit bus, giving it slightly *less* bandwidth. NVIDIA's naming implies a
+hierarchy but for inference the 4070 laptop sits below the 4060 laptop.
+
+**To actually beat the 3080 8 GB in bandwidth you need**: 4070 Ti, 4080, or 4090 in the
+laptop tier. All three also have 12–16 GB VRAM, meaning Devstral fits natively.
+
+### AMD mobile discrete options
+
+AMD laptop GPUs use ROCm on Linux (near-native performance) and Vulkan or DirectML on
+Windows (~10–20% overhead vs CUDA). The RX 7900M is the standout option.
+
+| GPU | Bus | VRAM | Bandwidth | Devstral fits | vs 3080 |
+|---|---|---|---|---|---|
+| RX 7700S 8 GB | 128-bit | GDDR6 | 224 GB/s | ❌ | -50% |
+| RX 7600M XT 8 GB | 128-bit | GDDR6 | 288 GB/s | ❌ | -36% |
+| **RX 7900M 16 GB** | **256-bit** | **GDDR6** | **576 GB/s** | **✅** | **+29%** |
+
+The RX 7900M is the only AMD laptop GPU that beats the 3080 8 GB for inference, and it
+does so while also providing 16 GB VRAM — meaning Devstral fits with room to spare.
+
+### Token/s estimates across the full stack (Hermes-3 8B Q4_K_M)
+
+| GPU | Bandwidth | Est. t/s | Devstral native | Notes |
+|---|---|---|---|---|
+| RTX 4090 laptop 16 GB | 576 GB/s | ~70–95 | ✅ | Best NVIDIA laptop option |
+| RX 7900M 16 GB | 576 GB/s | ~65–85 | ✅ | ROCm on Linux; ~10% less on Windows |
+| RTX 4080 laptop 12 GB | 432 GB/s | ~55–75 | ✅ | 12 GB: Devstral fits |
+| RTX 4070 Ti laptop 16 GB | 432 GB/s | ~55–75 | ✅ | 16 GB: Devstral fits |
+| **RTX 3080 laptop 8 GB** | **448 GB/s** | **~50–70** | ❌ | Best 8GB option |
+| M5 Pro 24 GB | ~300 GB/s | ~55–75 | ✅ | Measured: 52–57 t/s |
+| RTX 4060 laptop 8 GB | 272 GB/s | ~30–45 | ❌ | |
+| **RTX 4070 laptop 8 GB** | **256 GB/s** | **~28–42** | ❌ | **Slower than 4060** |
+| M1 Pro 16 GB | 200 GB/s | ~30–40 | ❌ | |
+
+### AMD on Linux vs Windows
+
+```
+Linux + ROCm (recommended for AMD):
+  llama.cpp detects AMD GPU via HIP/ROCm automatically
+  Performance ≈ 90–95% of CUDA equivalent
+  Install: sudo apt install rocm-hip-libraries  (Ubuntu 22.04+)
+
+Windows + Vulkan:
+  llama.cpp Vulkan backend works but has overhead
+  Performance ≈ 80–90% of Linux ROCm
+  No special install needed — llmctl uses Vulkan automatically if CUDA absent
+```
+
+### Buying guide summary
+
+| You have / want | Recommendation |
+|---|---|
+| 8 GB VRAM, want best inference | RTX 3080 laptop (older but fastest 8 GB) |
+| 8 GB VRAM, any Ada GPU | 4060 ≈ 4070, both in same tier, 4060 slightly faster |
+| Want Devstral + laptop + NVIDIA | RTX 4070 Ti / 4080 / 4090 laptop (12–16 GB VRAM) |
+| Want Devstral + laptop + AMD | RX 7900M (16 GB, 576 GB/s) — best on Linux/ROCm |
+| Want Devstral + best efficiency | M5 Pro 24 GB (no discrete GPU needed, 30–40 W) |
 
 ---
 
