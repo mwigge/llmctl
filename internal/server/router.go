@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,7 +43,57 @@ type routerHandler struct {
 
 func (h *routerHandler) handleChatCompletions(w http.ResponseWriter, req *http.Request) {
 	target := h.routeTarget(req)
+	req = injectToolChoice(req)
 	proxyRequest(w, req, target)
+}
+
+// injectToolChoice reads the request body and, when the JSON payload contains a
+// non-empty "tools" array and no "tool_choice" field, sets tool_choice to "auto".
+// This is required for backends that ignore tools when tool_choice is absent.
+// The function always returns a valid request; on any JSON parse error it returns
+// the original request unchanged.
+func injectToolChoice(req *http.Request) *http.Request {
+	if req.Body == nil {
+		return req
+	}
+
+	body, err := io.ReadAll(io.LimitReader(req.Body, 64*1024))
+	if err != nil {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		return req
+	}
+	// Restore body for downstream use (proxyRequest reads it again).
+	req.Body = io.NopCloser(bytes.NewReader(body))
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return req
+	}
+
+	// Only inject when "tools" is present and non-empty.
+	toolsRaw, hasTools := payload["tools"]
+	if !hasTools {
+		return req
+	}
+	var tools []json.RawMessage
+	if err := json.Unmarshal(toolsRaw, &tools); err != nil || len(tools) == 0 {
+		return req
+	}
+
+	// Only inject when "tool_choice" is absent.
+	if _, hasChoice := payload["tool_choice"]; hasChoice {
+		return req
+	}
+
+	payload["tool_choice"] = json.RawMessage(`"auto"`)
+	modified, err := json.Marshal(payload)
+	if err != nil {
+		return req
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(modified))
+	req.ContentLength = int64(len(modified))
+	return req
 }
 
 func (h *routerHandler) handlePassthrough(w http.ResponseWriter, req *http.Request) {

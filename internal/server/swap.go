@@ -215,5 +215,6 @@ func buildModelCmd(m config.ModelRef, port, ctxSize int) string {
 	sb.WriteString(strconv.Itoa(port))
 	sb.WriteString(" --ctx-size ")
 	sb.WriteString(strconv.Itoa(ctxSize))
+	sb.WriteString(" --jinja -fa on")
 	return sb.String()
 }

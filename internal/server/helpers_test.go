@@ -195,6 +195,12 @@ func TestBuildArgv_ContainsEssentialFlags(t *testing.T) {
 		{"--port", strconv.Itoa(cfg.Server.Port)},
 		{"--ctx-size", strconv.Itoa(cfg.Server.CtxSize)},
 		{"--threads", strconv.Itoa(cfg.Server.Threads)},
+		{"-fa", "on"},
+	}
+
+	// --jinja is a standalone flag (no value), check separately.
+	if !strings.Contains(strings.Join(args, " "), "--jinja") {
+		t.Errorf("argv missing --jinja; got: %s", strings.Join(args, " "))
 	}
 
 	argStr := strings.Join(args, " ")
@@ -348,6 +354,27 @@ func TestRemoveServiceFile_NoFile_NoError(t *testing.T) {
 // ----------------------------------------------------------------------------
 // BuildSwapConfig — additional coverage
 // ----------------------------------------------------------------------------
+
+func TestBuildSwapConfig_ContainsJinjaAndFlashAttn(t *testing.T) {
+	t.Parallel()
+
+	models := []config.ModelRef{
+		{Alias: "hermes", Path: "/models/hermes.gguf"},
+	}
+
+	data, err := server.BuildSwapConfig(models, false, 600, 8765, 32768)
+	if err != nil {
+		t.Fatalf("BuildSwapConfig() error = %v", err)
+	}
+
+	yaml := string(data)
+	if !strings.Contains(yaml, "--jinja") {
+		t.Errorf("BuildSwapConfig() cmd missing --jinja; got:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "-fa on") {
+		t.Errorf("BuildSwapConfig() cmd missing -fa on; got:\n%s", yaml)
+	}
+}
 
 func TestBuildSwapConfig_EmptyModels(t *testing.T) {
 	t.Parallel()

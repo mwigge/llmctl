@@ -109,6 +109,8 @@ CGO_ENABLED=1 go build -o ~/.local/bin/llmctl ./cmd/llmctl
 
 ## Model Management
 
+See [docs/tool-formats.md](docs/tool-formats.md) for a guide on OpenAI vs XML tool call formats and how to choose a model for agentic use.
+
 ```bash
 # Show the builtin catalog
 llmctl model catalog

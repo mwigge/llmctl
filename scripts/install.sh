@@ -107,7 +107,7 @@ cat <<'EOF'
 llmctl is ready. Next steps:
 
   1. Download a model:
-       llmctl model install Qwen2.5-Coder-7B
+       llmctl model install Hermes-3-Llama-3.1-8B
 
   2. Install the llama.cpp server:
        llmctl server install

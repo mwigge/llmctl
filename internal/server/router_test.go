@@ -12,6 +12,17 @@ import (
 	"github.com/mwigge/llmctl/internal/server"
 )
 
+// makeSimpleRouter builds a router that sends all chat completions to upstream.
+func makeSimpleRouter(upstream *httptest.Server) *server.RouterForTest {
+	cfg := &config.Config{
+		Server: config.ServerCfg{Host: "127.0.0.1", Port: 9910},
+		Models: []config.ModelRef{
+			{Alias: "m0", Path: "/m0.gguf", Role: "reason"},
+		},
+	}
+	return server.NewRouterForTest(cfg, upstream.URL, upstream.URL)
+}
+
 // upstreamRecord records the last request received and replies with a fixed body.
 type upstreamRecord struct {
 	lastBody string
@@ -158,5 +169,83 @@ func TestRouter_SSEHeaders_Preserved(t *testing.T) {
 	}
 	if rr.Header().Get("X-Custom-Header") != "yes" {
 		t.Errorf("X-Custom-Header not preserved")
+	}
+}
+
+func TestRouter_InjectsToolChoice_WhenToolsPresentAndChoiceAbsent(t *testing.T) {
+	t.Parallel()
+
+	var receivedBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	rt := makeSimpleRouter(upstream)
+
+	body := `{"messages":[{"role":"user","content":"call a tool"}],"tools":[{"type":"function","function":{"name":"get_weather"}}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if !strings.Contains(receivedBody, `"tool_choice":"auto"`) {
+		t.Errorf("expected tool_choice:auto injected; upstream received:\n%s", receivedBody)
+	}
+}
+
+func TestRouter_DoesNotOverwriteExistingToolChoice(t *testing.T) {
+	t.Parallel()
+
+	var receivedBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	rt := makeSimpleRouter(upstream)
+
+	body := `{"messages":[{"role":"user","content":"call a tool"}],"tools":[{"type":"function","function":{"name":"get_weather"}}],"tool_choice":"none"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if strings.Contains(receivedBody, `"tool_choice":"auto"`) {
+		t.Errorf("tool_choice should not be overwritten; upstream received:\n%s", receivedBody)
+	}
+	if !strings.Contains(receivedBody, `"tool_choice":"none"`) {
+		t.Errorf("original tool_choice should be preserved; upstream received:\n%s", receivedBody)
+	}
+}
+
+func TestRouter_NoInjection_WhenNoTools(t *testing.T) {
+	t.Parallel()
+
+	var receivedBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[]}`))
+	}))
+	defer upstream.Close()
+
+	rt := makeSimpleRouter(upstream)
+
+	body := `{"messages":[{"role":"user","content":"hello"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	rt.ServeHTTP(rr, req)
+
+	if strings.Contains(receivedBody, "tool_choice") {
+		t.Errorf("tool_choice should not be added when no tools present; got:\n%s", receivedBody)
 	}
 }

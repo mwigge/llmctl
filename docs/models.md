@@ -1,5 +1,18 @@
 # Model Management
 
+## Tool Call Format
+
+Local LLMs emit tool calls in one of two formats: the native OpenAI JSON format
+(structured `tool_calls` field, no parsing needed) or the Qwen/Hermes XML format
+(`<function_call>` or `<tool_call>` tags embedded in `content`). The format a
+model uses is determined by its training and chat template. llmctl handles both
+transparently — all launchers include `--jinja` and the HTTP router rewrites XML
+responses into structured tool calls before they reach your client.
+
+See [docs/tool-formats.md](tool-formats.md) for the full technical reference:
+format specifications, how `--jinja` works, model selection guidance, and a curl
+command to verify your setup.
+
 ## GGUF Format
 
 GGUF (GPT-Generated Unified Format) is the file format used by llama.cpp to store

@@ -5,16 +5,16 @@ package config
 func DefaultConfig() *Config {
 	return &Config{
 		Mode: "single",
-		// Default to the 7B coder model — large enough for reliable tool use,
-		// small enough for 8GB machines. Path is empty until installed via
-		// llmctl model install Qwen2.5-Coder-7B.
+		// Default to Hermes-3 — native OpenAI tool_calls JSON, agentic loops,
+		// requires --jinja at server launch. Path is empty until installed via
+		// llmctl model install Hermes-3-Llama-3.1-8B.
 		Models: []ModelRef{
-			{Alias: "qwen2.5-coder-7b", Path: "", Role: "code"},
+			{Alias: "hermes-3-llama-3.1-8b", Path: "", Role: "code"},
 		},
 		Server: ServerCfg{
 			Host:      "127.0.0.1",
 			Port:      8765,
-			CtxSize:   16384,
+			CtxSize:   32768,
 			Threads:   4,
 			GPULayers: 0,
 			Temp:      0.7,

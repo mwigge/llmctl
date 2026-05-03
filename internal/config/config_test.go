@@ -20,7 +20,7 @@ func TestDefaultConfig(t *testing.T) {
 	}{
 		{"mode", cfg.Mode, "single"},
 		{"port", cfg.Server.Port, 8765},
-		{"ctx_size", cfg.Server.CtxSize, 16384},
+		{"ctx_size", cfg.Server.CtxSize, 32768},
 		{"temp", cfg.Server.Temp, 0.7},
 		{"cost_per_token", cfg.Business.CostPerToken, 0.0001},
 		{"currency", cfg.Business.CurrencySymbol, "$"},
@@ -103,8 +103,8 @@ func TestLoad_DefaultsFillMissingFields(t *testing.T) {
 	if cfg.Server.Port != 8765 {
 		t.Errorf("server.port = %d, want 8765 (default)", cfg.Server.Port)
 	}
-	if cfg.Server.CtxSize != 16384 {
-		t.Errorf("server.ctx_size = %d, want 16384 (default)", cfg.Server.CtxSize)
+	if cfg.Server.CtxSize != 32768 {
+		t.Errorf("server.ctx_size = %d, want 32768 (default)", cfg.Server.CtxSize)
 	}
 	if cfg.Business.CurrencySymbol != "$" {
 		t.Errorf("business.currency_symbol = %q, want \"$\" (default)", cfg.Business.CurrencySymbol)

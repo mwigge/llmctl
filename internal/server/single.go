@@ -160,6 +160,8 @@ func (m *singleManager) buildArgv() []string {
 		"--port", strconv.Itoa(cfg.Server.Port),
 		"--ctx-size", strconv.Itoa(cfg.Server.CtxSize),
 		"--threads", strconv.Itoa(cfg.Server.Threads),
+		"--jinja",
+		"-fa", "on",
 	)
 
 	if cfg.Server.GPULayers > 0 {
