@@ -9,8 +9,11 @@ with a single CLI. OpenAI-compatible API — any client that speaks `/v1` works.
 # Install
 curl -sSf https://github.com/mwigge/llmctl/releases/latest/download/install.sh | bash
 
-# Download a model (4.4 GB)
-llmctl model install Qwen2.5-Coder-7B
+# Download the default model — Devstral-Small (12 GB, needs 16 GB RAM)
+llmctl model install Devstral-Small
+
+# Or a lighter 8 GB model for machines with less RAM
+llmctl model install Hermes-3-Llama-3.1-8B
 
 # Install the inference server
 llmctl server install
@@ -202,12 +205,64 @@ llmctl config set otel.endpoint http://localhost:4318
 llmctl config set otel.service_name my-llm-service
 ```
 
+## European Models — Devstral and Mistral AI
+
+The default model is **Devstral-Small-2505**, developed by [Mistral AI](https://mistral.ai) in France.
+
+### Why European models
+
+- **Data sovereignty**: open-weight models run entirely on your hardware — no data leaves your infrastructure.
+- **GDPR compliance**: self-hosted inference has no third-party data processor, no retention, no telemetry.
+- **License clarity**: Devstral-Small is Apache 2.0 — unrestricted commercial use, no usage-based fees.
+- **EU AI Act alignment**: Mistral AI is a French company subject to EU regulation, with transparent training practices.
+
+### Devstral-Small-2505
+
+| Property | Value |
+|---|---|
+| Developer | Mistral AI (Paris, France) |
+| License | Apache 2.0 |
+| Parameters | ~24B (MoE, small active parameter count) |
+| GGUF size | ~12 GB (Q4_K_M) |
+| RAM required | 16 GB minimum |
+| Tool calling | Native OpenAI `tool_calls` JSON (needs `--jinja`) |
+| SWE-bench Verified | 46.8% — top in its class at time of release |
+
+```bash
+llmctl model install Devstral-Small
+llmctl server start
+```
+
+Devstral is fine-tuned for software engineering tasks: file editing, code generation, repository navigation, and agentic tool loops. The `--jinja` flag is already included in the llmctl server launcher by default.
+
+### Other Mistral models
+
+| Model | Size | Notes |
+|---|---|---|
+| Devstral-Small-2505 | 12 GB | Default. Coding specialist, Apache 2.0 |
+| Mistral-7B-v0.3 | 4.1 GB | General instruction model, lighter RAM footprint |
+
+### Lighter alternatives (non-EU, 8 GB RAM)
+
+If you are on a machine with less than 16 GB RAM and cannot run Devstral, these are the next best options for agentic use:
+
+```bash
+# 8 GB RAM — Hermes-3 (NousResearch) — native OpenAI tool_calls
+llmctl model install Hermes-3-Llama-3.1-8B
+
+# 8 GB RAM — Qwen3-8B (Alibaba) — tool-use + chain-of-thought reasoning  
+llmctl model install Qwen3-8B
+```
+
+See [docs/models.md](docs/models.md) for the full catalog and RAM requirements.
+
 ## Documentation
 
 | Doc | Contents |
 |---|---|
 | [docs/local-server.md](docs/local-server.md) | Deployment modes, systemd, ports, monitoring |
 | [docs/models.md](docs/models.md) | GGUF format, quantisation, model selection |
+| [docs/tool-formats.md](docs/tool-formats.md) | OpenAI vs XML tool call formats — how to pick a model for agentic use |
 | [docs/temperature.md](docs/temperature.md) | Sampling parameters: temperature, top-p, top-k |
 | [docs/tuning.md](docs/tuning.md) | Performance tuning: threads, GPU layers, batch size |
 | [docs/offline.md](docs/offline.md) | Offline bundles for air-gapped deployments |
