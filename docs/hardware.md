@@ -17,6 +17,7 @@ to GPU and which model fits within your memory budget.
 | 5 | Server, 2× H100 80 GB | 160 GB | — | Llama-3.1-70B or Qwen3-32B | Q8_0 | 99 (split) | hot-swap | 80–200+ |
 | 6 | Server, RTX 5070 Ti 16 GB, 16 GB RAM | 16 GB | 16 GB | Devstral-Small | Q4_K_M | 99 | single | 60–90 |
 | 7 | Server, Intel 14th gen, RTX 5070 Ti 16 GB, 32 GB RAM | 16 GB | 32 GB | Devstral-Small | Q4_K_M | 99 | cold-swap | 65–95 |
+| 8 | Workstation, AMD RX 7900 GRE 16 GB, 32 GB RAM | 16 GB | 32 GB | Devstral-Small | Q4_K_M | 99 | single | 55–70 (Linux) / 48–60 (Windows) |
 
 Tokens/s figures are for a single concurrent user. Context size 32768, no batching.
 
@@ -294,6 +295,163 @@ llmctl config set server.ctx_size 65536   # 64K context — fits with 32 GB RAM
 
 With Devstral fully in VRAM and KV cache on the GPU side (4 GB spare), setting
 `ctx_size 65536` adds ~1 GB system RAM overhead — well within the 32 GB budget.
+
+---
+
+### 8 — Workstation, AMD RX 7900 GRE 16 GB VRAM, 32 GB system RAM
+
+The RX 7900 GRE uses the same Navi 31 die as the 7900 XT and 7900 XTX, cut down to
+60 compute units. With 16 GB GDDR6 on a 256-bit bus it delivers 576 GB/s — matching the
+RTX 4090 laptop and beating every other option in the 8–16 GB VRAM tier except the H100.
+
+```bash
+llmctl model install Devstral-Small
+llmctl config set server.gpu_layers 99
+llmctl config set server.ctx_size 32768
+llmctl server start
+# Linux ROCm:    ~55–70 t/s
+# Windows Vulkan: ~48–60 t/s
+```
+
+**Devstral fits — just.** Memory budget at ctx 32768:
+
+```
+Model weights:    13.0 GB
+KV cache (32K):   ~1.5 GB
+Compute buffers:  ~0.3 GB
+─────────────────────────
+Total:            ~14.8 GB  →  fits in 16 GB VRAM with ~1.2 GB margin
+```
+
+Reduce ctx to 16384 if you see out-of-memory errors, or switch to Q4_K_S (12.5 GB) for
+a bit more headroom.
+
+**Linux vs Windows matters for AMD:**
+
+```
+Linux + ROCm (recommended):
+  llama.cpp uses HIP backend — near-native CUDA-class performance
+  sudo apt install rocm-hip-libraries   (Ubuntu 22.04+)
+  llmctl detects ROCm automatically
+
+Windows + Vulkan:
+  llama.cpp Vulkan backend — ~10–15% slower than ROCm
+  No extra install needed
+  Set: llmctl config set server.extra_args "--gpu-layers 99"
+```
+
+**CPU note:** For this GPU, any modern CPU is fine for single-user generation. The
+RX 7900 GRE does all the heavy work; the CPU just feeds it tokens and handles
+network I/O. See the CPU and RAM section below for when this changes.
+
+```bash
+llmctl config set server.gpu_layers 99
+llmctl config set server.threads 4    # minimal CPU threads needed
+```
+
+---
+
+## Does CPU and RAM speed matter?
+
+The short answer: **almost never**, as long as the model fits in GPU memory. When it
+doesn't fit, both matter a lot.
+
+### When the model fits fully in GPU VRAM / unified memory
+
+The GPU loads model weights from its own memory (VRAM or unified pool) for every token.
+The CPU is not involved in weight loading at all — it only:
+- Feeds the token IDs to the GPU (~kilobytes per request)
+- Handles HTTP/socket I/O for the API
+- Manages the llama-server process
+
+In this mode, swapping a Core i5 for a Core i9 makes no measurable difference to
+tokens/s. RAM speed (DDR4 vs DDR5) makes no difference either — the GPU never reads
+from system RAM during inference.
+
+```
+Model fully in GPU memory:
+
+System RAM → CPU → [token IDs, tiny] → GPU → [generates tokens at GPU speed]
+                                              ↑
+                                    GPU VRAM / unified memory
+                                    (weights loaded here, no CPU involved)
+```
+
+**RAM amount** still matters for comfort: you need enough system RAM for the OS,
+the llama-server process (~500 MB), and any other applications running alongside.
+16 GB is sufficient; 32 GB is comfortable.
+
+### When the model does NOT fit (hybrid / partial offload)
+
+Now the CPU runs some of the transformer layers. Every forward pass crosses the PCIe
+bus and CPU RAM becomes part of the inference path.
+
+In hybrid mode, three things limit speed:
+
+| Bottleneck | What helps |
+|---|---|
+| PCIe bus (32 GB/s) | Nothing — this is the hard ceiling |
+| CPU layer compute | More cores, AVX-512, higher IPC |
+| CPU RAM bandwidth | DDR5 > DDR4; dual-channel essential |
+
+```
+Hybrid mode (model too big for VRAM):
+
+  CPU RAM (layers 21-40)               GPU VRAM (layers 1-20)
+  DDR5 at ~80 GB/s        PCIe 32 GB/s  GDDR6X at 448 GB/s
+  ←─────────────────────────────────────────────────────→
+                      bottleneck here ↑
+```
+
+DDR5 vs DDR4 for hybrid inference on a 7900 GRE or similar:
+- DDR4-3200 dual-channel: ~50 GB/s
+- DDR5-4800 dual-channel: ~77 GB/s
+- DDR5-6400 dual-channel: ~100 GB/s
+- PCIe 4.0 x16: 32 GB/s one-way — still the ceiling regardless of RAM speed
+
+**Practical conclusion for hybrid mode:** faster RAM helps CPU layer throughput but
+PCIe is always the final bottleneck. Upgrading from DDR4 to DDR5 gives ~5–10% speed
+improvement in hybrid mode, not the ~2× DDR5 bandwidth ratio would suggest.
+
+### Large context KV cache overflow
+
+The KV cache lives in GPU VRAM by default. When context is very large it can overflow
+into system RAM. This is the one case where RAM speed matters even with a fully-loaded
+model:
+
+| ctx size | KV cache (Devstral) | Fits in 7900 GRE VRAM? |
+|---|---|---|
+| 16 384 | ~0.75 GB | ✅ Yes — 1.9 GB margin |
+| 32 768 | ~1.5 GB | ✅ Yes — 1.2 GB margin (tight) |
+| 65 536 | ~3.0 GB | ❌ Overflows to system RAM |
+| 131 072 | ~6.0 GB | ❌ Overflows to system RAM |
+
+If KV cache overflows, RAM bandwidth becomes the bottleneck for attention lookups.
+DDR5 is noticeably faster here. To avoid overflow at large context sizes, use a
+smaller quantisation (Q4_K_S, Q3_K_M) to free VRAM, or set a lower `--ctx-size`.
+
+### Multi-user / batching
+
+With multiple concurrent users (`--parallel N`), the GPU batches requests together.
+In this mode:
+- **CPU** handles concurrent HTTP connections, request queuing, and token routing. A
+  4-core CPU starts to bottleneck at ~8 parallel users. 8–12 cores is comfortable for
+  up to 32 concurrent users.
+- **RAM** needs to hold N × KV cache simultaneously. At 32 parallel users with 32K
+  context: 32 × 1.5 GB = 48 GB KV cache — well beyond any VRAM, entirely in system RAM.
+  This makes both RAM size and RAM bandwidth critical for high-concurrency deployments.
+
+### Summary table
+
+| Scenario | CPU matters? | RAM speed matters? | RAM size matters? |
+|---|---|---|---|
+| Model fits in VRAM, single user | ❌ No | ❌ No | ❌ Not beyond ~16 GB |
+| Hybrid mode (overflow to CPU) | ✅ Yes — IPC, AVX | ✅ Yes (DDR5 > DDR4) | ✅ More = more layers |
+| Large ctx KV overflow | ❌ No | ✅ Yes (DDR5 > DDR4) | ✅ Yes |
+| Many concurrent users | ✅ Yes (≥8 cores) | ✅ Yes | ✅ Yes — N × KV cache |
+
+**For the RX 7900 GRE with Devstral at ctx 32768, single user:**
+CPU and RAM are irrelevant to tokens/s. Any modern CPU with 32 GB DDR4 or DDR5 is fine.
 
 ---
 
