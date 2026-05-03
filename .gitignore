@@ -1,0 +1,4 @@
+/llmctl
+dist/
+*.db
+*.log
