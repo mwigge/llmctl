@@ -434,6 +434,94 @@ llmctl config set server.gpu_layers 99
 
 ---
 
+## Devstral on M5 Pro 24 GB vs M1 Pro 16 GB — Apple Silicon comparison
+
+Both machines share the same unified memory architecture, same Metal backend, and same
+llama.cpp code path. The difference is that Devstral-Small Q4_K_M is **13 GB** and the
+M1 Pro only has **16 GB total** — leaving almost nothing for the OS once the model loads.
+
+### The memory ceiling problem on M1 Pro 16 GB
+
+macOS Metal enforces a `recommendedMaxWorkingSetSize` — the safe upper limit for GPU
+allocations before the OS starts compressing memory and paging data to SSD.
+
+| Machine | Total memory | recommendedMaxWorkingSetSize | Devstral (13 GB) fits? |
+|---|---|---|---|
+| M5 Pro 24 GB | 24 GB | **19.1 GB** (measured) | ✅ Yes — 6 GB to spare |
+| M1 Pro 16 GB | 16 GB | **~12 GB** (75% of 16 GB) | ❌ No — 1 GB over limit |
+
+When a Metal allocation exceeds `recommendedMaxWorkingSetSize`, macOS does not hard-fail —
+it starts silently evicting GPU pages to the SSD-backed swap file. Apple's NVMe is fast
+(~5 GB/s read) but it is still **40–60× slower than unified memory bandwidth**. Every
+evicted page that is needed for a matrix multiply causes a stall.
+
+In practice on M1 Pro 16 GB with Devstral:
+- The model may load but macOS will immediately show high memory pressure (red bar in Activity Monitor).
+- Generation speed drops to **3–10 tokens/s** as GPU pages are swapped in and out mid-inference.
+- The machine becomes sluggish for all other applications while inference is running.
+- If any other application allocates significant memory, the model may be evicted entirely.
+
+### Memory budget breakdown
+
+```
+M1 Pro 16 GB                          M5 Pro 24 GB
+─────────────────────────────────────  ─────────────────────────────────────
+macOS + processes:     ~3–4 GB         macOS + processes:     ~3–4 GB
+Devstral Q4_K_M:       13.0 GB         Devstral Q4_K_M:       13.0 GB
+KV cache (32K ctx):     ~0.5 GB        KV cache (32K ctx):     ~0.5 GB
+─────────────────────                  ─────────────────────
+Total needed:          ~16.5–17.5 GB   Total needed:          ~16.5–17.5 GB
+Total available:       16 GB           Total available:        24 GB
+                       ─────                                   ─────
+Headroom:              -0.5 to -1.5 GB Headroom:              +6.5–7.5 GB ✅
+```
+
+### Performance comparison
+
+| | M5 Pro 24 GB | M1 Pro 16 GB |
+|---|---|---|
+| Memory bandwidth | ~300 GB/s | 200 GB/s |
+| GPU cores | 20-core | 16-core |
+| GPU family | Apple10 (M5) | Apple7 (M1) |
+| Devstral fits in recommended working set | ✅ Yes | ❌ No — exceeds by ~1 GB |
+| Prompt prefill | **235–387 t/s** (measured) | ~5–20 t/s (swap-limited) |
+| Token generation | **52–57 t/s** (measured) | ~3–10 t/s (swap-limited) |
+| macOS memory pressure | None | High (red) |
+| Context 32 K comfortable | ✅ Yes | ⚠️ No — worsens swap |
+
+### What to run on M1 Pro 16 GB instead
+
+The M1 Pro 16 GB is well-matched to 7–8B models, which fit entirely within the
+recommended working set with room for the OS and a generous KV cache.
+
+| Model | Size | Expected t/s on M1 Pro 16 GB | Notes |
+|---|---|---|---|
+| Hermes-3-Llama-3.1-8B Q4_K_M | 4.9 GB | **30–40 t/s** | Best agentic 8B, native tool_calls |
+| Qwen3-8B Q4_K_M | 5.2 GB | 28–38 t/s | Reasoning + tools |
+| Qwen2.5-Coder-7B Q4_K_M | 4.7 GB | 32–42 t/s | Strong coder |
+| Qwen2.5-Coder-14B Q4_K_M | 8.9 GB | 15–22 t/s | Fits with ~3 GB headroom |
+
+```bash
+# M1 Pro 16 GB — recommended setup
+llmctl model install Hermes-3-Llama-3.1-8B
+llmctl config set server.gpu_layers 99
+llmctl config set server.ctx_size 32768
+llmctl server start
+```
+
+### Summary: when to upgrade from M1 Pro 16 GB
+
+The M1 Pro 16 GB is not underpowered — it is the wrong memory size for models above ~10 GB.
+The M5 Pro 24 GB resolves this completely: the extra 8 GB shifts Devstral from
+"memory pressure territory" to "fits with 6 GB to spare." The bandwidth jump (200 → 300 GB/s)
+and newer GPU architecture add another ~40–50% speed uplift on top.
+
+If you are on M1 Pro 16 GB and doing agentic coding work, Hermes-3 8B is the correct
+Devstral substitute — same OpenAI tool_calls JSON format, same `--jinja` flag, roughly
+comparable code quality at 8B scale, and it runs fast and stable within 16 GB.
+
+---
+
 ## llmctl config quick reference
 
 ```bash
