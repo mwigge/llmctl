@@ -21,6 +21,16 @@ type CatalogEntry struct {
 // uses a different format (e.g. Qwen XML) that requires client-side translation.
 var BuiltinCatalog = []CatalogEntry{
 	{
+		Name:          "Devstral-Small",
+		Repo:          "unsloth/Devstral-Small-2505-GGUF",
+		Quant:         "Q4_K_M",
+		SizeGB:        "12GB",
+		MinRAMGB:      16,
+		ToolUse:       true,
+		OpenAIToolFmt: true,
+		Description:   "Default. EU-developed (Mistral AI, France). Apache 2.0. Native OpenAI tool_calls JSON. Top SWE-bench score in class. Requires --jinja.",
+	},
+	{
 		Name:          "Hermes-3-Llama-3.1-8B",
 		Repo:          "NousResearch/Hermes-3-Llama-3.1-8B-GGUF",
 		Quant:         "Q4_K_M",
@@ -28,7 +38,7 @@ var BuiltinCatalog = []CatalogEntry{
 		MinRAMGB:      8,
 		ToolUse:       true,
 		OpenAIToolFmt: true,
-		Description:   "Best agentic model: natively emits OpenAI tool_calls JSON. Requires --jinja at server launch. Excellent for coding + file writes.",
+		Description:   "Agentic 8B model, native OpenAI tool_calls JSON. Requires --jinja. Good for 8GB RAM machines.",
 	},
 	{
 		Name:          "Llama-3.1-8B",
@@ -95,16 +105,6 @@ var BuiltinCatalog = []CatalogEntry{
 		MinRAMGB:    12,
 		ToolUse:     true,
 		Description: "DeepSeek Coder V2 Lite with tool-use support",
-	},
-	{
-		Name:          "Llama-3.1-8B",
-		Repo:          "unsloth/Meta-Llama-3.1-8B-Instruct-GGUF",
-		Quant:         "Q4_K_M",
-		SizeGB:        "4.9GB",
-		MinRAMGB:      8,
-		ToolUse:       true,
-		OpenAIToolFmt: true,
-		Description:   "Meta Llama 3.1 8B instruction-tuned with tool-use. Requires --jinja for structured tool calling.",
 	},
 	{
 		Name:        "Mistral-7B-v0.3",

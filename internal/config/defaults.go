@@ -9,7 +9,7 @@ func DefaultConfig() *Config {
 		// requires --jinja at server launch. Path is empty until installed via
 		// llmctl model install Hermes-3-Llama-3.1-8B.
 		Models: []ModelRef{
-			{Alias: "hermes-3-llama-3.1-8b", Path: "", Role: "code"},
+			{Alias: "devstral-small", Path: "", Role: "code"},
 		},
 		Server: ServerCfg{
 			Host:      "127.0.0.1",
