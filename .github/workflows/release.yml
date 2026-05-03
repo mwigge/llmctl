@@ -1,0 +1,51 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install build dependencies
+        run: sudo apt-get install -y libsqlite3-dev
+
+      - name: Build binary
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=1 go build \
+            -ldflags "-X main.version=${{ github.ref_name }}" \
+            -o dist/llmctl \
+            ./cmd/llmctl
+
+      - name: Run tests
+        run: go test ./... -count=1 -race
+
+      - name: Build packages
+        run: bash scripts/build-packages.sh
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "llmctl ${{ github.ref_name }}" \
+            --generate-notes \
+            dist/llmctl \
+            dist/llmctl_*.deb \
+            dist/llmctl-*.rpm \
+            scripts/install.sh || \
+          gh release upload "${{ github.ref_name }}" --clobber \
+            dist/llmctl \
+            dist/llmctl_*.deb \
+            dist/llmctl-*.rpm \
+            scripts/install.sh
