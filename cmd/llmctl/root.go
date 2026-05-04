@@ -25,6 +25,7 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(&cfgPath),
 		newMetricsCmd(&cfgPath),
 		newBundleCmd(),
+		newReviewCmd(),
 	)
 	return root
 }
