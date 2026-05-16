@@ -25,6 +25,7 @@ func newRootCmd() *cobra.Command {
 		newModelCmd(),
 		newConfigCmd(&cfgPath),
 		newMetricsCmd(&cfgPath),
+		newObserveCmd(&cfgPath),
 		newBundleCmd(),
 		newReviewCmd(),
 	)

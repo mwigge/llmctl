@@ -67,6 +67,55 @@ func TestConfigCmd_Init(t *testing.T) {
 	}
 }
 
+func TestModelInstall_LocalGGUFRegistersOffline(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	modelPath := filepath.Join(dir, "offline.gguf")
+	if err := os.WriteFile(modelPath, []byte("gguf"), 0o600); err != nil {
+		t.Fatalf("write model: %v", err)
+	}
+	out, err := executeCmd(t, "--config", cfgPath, "model", "install", modelPath, "--alias", "offline")
+	if err != nil {
+		t.Fatalf("model install local error = %v; out=%s", err, out)
+	}
+	if !strings.Contains(out, "[ok] offline") {
+		t.Fatalf("output = %q, want offline registration", out)
+	}
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(data), "offline") || !strings.Contains(string(data), modelPath) {
+		t.Fatalf("config missing local model registration:\n%s", string(data))
+	}
+}
+
+func TestObserveDriftRecordsEvent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	dbPath := filepath.Join(dir, "metrics.db")
+	cfgContent := "metrics:\n  db_path: " + dbPath + "\notel:\n  service_name: llmctl-test\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	out, err := executeCmd(t, "--config", cfgPath, "observe", "drift", "--model", "m", "--baseline", "a b c", "--sample", "a x y")
+	if err != nil {
+		t.Fatalf("observe drift error = %v; out=%s", err, out)
+	}
+	if !strings.Contains(out, "drift_score") {
+		t.Fatalf("output = %q, want drift score", out)
+	}
+	show, err := executeCmd(t, "--config", cfgPath, "observe", "show", "--kind", "ai.drift")
+	if err != nil {
+		t.Fatalf("observe show error = %v; out=%s", err, show)
+	}
+	if !strings.Contains(show, "ai.drift") || !strings.Contains(show, "m") {
+		t.Fatalf("observe show output = %q, want stored drift", show)
+	}
+}
+
 func TestMetricsCmd_Show_NoData(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

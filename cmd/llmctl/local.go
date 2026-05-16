@@ -16,6 +16,7 @@ func newLocalCmd(cfgPath *string) *cobra.Command {
 			},
 		},
 		newLocalInstallGPUCmd(cfgPath),
+		newLocalInstallSwapCmd(cfgPath),
 		&cobra.Command{
 			Use:   "server-status",
 			Short: "show local server status",
@@ -34,10 +35,28 @@ func newLocalCmd(cfgPath *string) *cobra.Command {
 	return cmd
 }
 
+func newLocalInstallSwapCmd(cfgPath *string) *cobra.Command {
+	var hot bool
+	cmd := &cobra.Command{
+		Use:   "install-swap",
+		Short: "configure hot or cold model swap serving",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := "cold-swap"
+			if hot {
+				mode = "hot-swap"
+			}
+			return configureSwapMode(cmd, *cfgPath, mode)
+		},
+	}
+	cmd.Flags().BoolVar(&hot, "hot", false, "preload swap models instead of loading on demand")
+	return cmd
+}
+
 func newLocalInstallGPUCmd(cfgPath *string) *cobra.Command {
 	var (
 		dryRun bool
 		accel  string
+		budget float64
 	)
 	cmd := &cobra.Command{
 		Use:   "install-gpu-server",
@@ -48,10 +67,12 @@ func newLocalInstallGPUCmd(cfgPath *string) *cobra.Command {
 				GPU:        true,
 				DryRun:     dryRun,
 				Accel:      accel,
+				Budget:     budget,
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the selected hardware/model plan without changing files")
 	cmd.Flags().StringVar(&accel, "accel", "auto", "GPU acceleration: auto|vulkan|cuda|hip")
+	cmd.Flags().Float64Var(&budget, "resource-budget", 0.80, "fraction of CPU/RAM/GPU memory available for model serving")
 	return cmd
 }

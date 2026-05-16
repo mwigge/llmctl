@@ -26,6 +26,7 @@ type serverInstallOptions struct {
 	GPU        bool
 	DryRun     bool
 	Accel      string
+	Budget     float64
 }
 
 func installLocalServer(cmd *cobra.Command, opts serverInstallOptions) error {
@@ -36,14 +37,18 @@ func installLocalServer(cmd *cobra.Command, opts serverInstallOptions) error {
 		cfg = loaded
 	}
 
-	selected := catalogByName("Qwen3-8B")
+	budget := opts.Budget
+	if budget <= 0 {
+		budget = 0.80
+	}
+	selected := selectRAMCatalogModel(systemRAMGB() * budget)
 	accel := "cpu"
 	if opts.GPU {
 		gpu, err := detectBestLocalGPU()
 		if err != nil {
 			return err
 		}
-		pick, err := selectGPUCatalogModel(gpu.VRAMGB)
+		pick, err := selectGPUCatalogModel(gpu.VRAMGB * budget)
 		if err != nil {
 			return err
 		}
@@ -53,7 +58,7 @@ func installLocalServer(cmd *cobra.Command, opts serverInstallOptions) error {
 			return err
 		}
 		accel = resolvedAccel
-		fmt.Fprintf(out, "GPU: %s (%s, %.1fGB VRAM)\n", gpu.Name, gpu.Vendor, gpu.VRAMGB)
+		fmt.Fprintf(out, "GPU: %s (%s, %.1fGB VRAM, %.0f%% reserved for models)\n", gpu.Name, gpu.Vendor, gpu.VRAMGB, budget*100)
 	}
 	fmt.Fprintf(out, "Model: %s (%s %s, %s)\n", selected.Name, selected.Repo, selected.Quant, selected.SizeGB)
 	fmt.Fprintf(out, "Accel: %s\n", accel)
@@ -91,12 +96,12 @@ func installLocalServer(cmd *cobra.Command, opts serverInstallOptions) error {
 	fmt.Fprintf(out, "[ok] model cached at %s\n", modelPath)
 
 	cfg.Mode = "single"
-	cfg.Server.Host = defaultString(cfg.Server.Host, "127.0.0.1")
+	cfg.Server.Host = defaultString(cfg.Server.Host, "0.0.0.0")
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8765
 	}
 	if cfg.Server.Threads == 0 {
-		cfg.Server.Threads = 4
+		cfg.Server.Threads = maxInt(1, int(float64(runtime.NumCPU())*budget))
 	}
 	if opts.GPU {
 		cfg.Server.GPULayers = 99
@@ -352,15 +357,14 @@ func commandExists(name string) bool {
 	return err == nil
 }
 
-func selectGPUCatalogModel(vramGB float64) (model.CatalogEntry, error) {
-	if vramGB <= 0 {
+func selectGPUCatalogModel(budgetGB float64) (model.CatalogEntry, error) {
+	if budgetGB <= 0 {
 		return model.CatalogEntry{}, errors.New("GPU VRAM is unknown")
 	}
-	budget := vramGB * 0.45
 	var best model.CatalogEntry
 	for _, entry := range model.BuiltinCatalog {
 		size := parseSizeGB(entry.SizeGB)
-		if size <= 0 || size > budget {
+		if size <= 0 || size > budgetGB {
 			continue
 		}
 		if best.Name == "" || size > parseSizeGB(best.SizeGB) {
@@ -368,9 +372,55 @@ func selectGPUCatalogModel(vramGB float64) (model.CatalogEntry, error) {
 		}
 	}
 	if best.Name == "" {
-		return model.CatalogEntry{}, fmt.Errorf("no curated GGUF fits %.1fGB VRAM with safety headroom", vramGB)
+		return model.CatalogEntry{}, fmt.Errorf("no curated GGUF fits %.1fGB resource budget", budgetGB)
 	}
 	return best, nil
+}
+
+func selectRAMCatalogModel(budgetGB float64) model.CatalogEntry {
+	if budgetGB <= 0 {
+		return catalogByName("Qwen3-8B")
+	}
+	best := catalogByName("Phi-3.5-mini")
+	for _, entry := range model.BuiltinCatalog {
+		size := parseSizeGB(entry.SizeGB)
+		if size > 0 && size <= budgetGB && size > parseSizeGB(best.SizeGB) {
+			best = entry
+		}
+	}
+	return best
+}
+
+func systemRAMGB() float64 {
+	switch runtime.GOOS {
+	case "linux":
+		data, err := os.ReadFile("/proc/meminfo")
+		if err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "MemTotal:") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						kb, _ := strconv.ParseFloat(fields[1], 64)
+						return kb / 1024 / 1024
+					}
+				}
+			}
+		}
+	case "darwin":
+		out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+		if err == nil {
+			bytes, _ := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+			return bytes / (1024 * 1024 * 1024)
+		}
+	}
+	return 0
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func parseSizeGB(s string) float64 {

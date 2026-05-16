@@ -204,7 +204,11 @@ func BuildSwapConfig(models []config.ModelRef, hot bool, ttl, port, ctxSize int)
 // buildModelCmd constructs the llama-server command string for llama-swap.
 func buildModelCmd(m config.ModelRef, port, ctxSize int) string {
 	var sb strings.Builder
-	sb.WriteString("/usr/bin/llama-server")
+	if bin, err := FindLlamaServer(); err == nil {
+		sb.WriteString(bin)
+	} else {
+		sb.WriteString("llama-server")
+	}
 	sb.WriteString(" -m ")
 	sb.WriteString(m.Path)
 	if m.Alias != "" {

@@ -9,11 +9,22 @@ with a single CLI. OpenAI-compatible API — any client that speaks `/v1` works.
 # Install
 curl -sSf https://github.com/mwigge/llmctl/releases/latest/download/install.sh | bash
 
-# Install or refresh the inference server and default local model
+# Install or refresh the CPU-only inference server and default local model
 llmctl server install
 
 # Or let llmctl detect NVIDIA, AMD, or macOS GPU memory and pick a model
 llmctl server install-gpu
+
+# Register an offline/local GGUF with no network access
+llmctl model install /models/Qwen3-8B-Q4_K_M.gguf --alias qwen3-8b
+
+# Or install from a direct URL / HuggingFace repo / catalog name
+llmctl model install https://host/models/model.gguf --alias lab-model
+llmctl model install unsloth/Qwen3-8B-GGUF --alias qwen3-8b
+
+# Serve multiple models; cold loads on demand, hot preloads
+llmctl server install-swap --mode cold
+llmctl server install-swap --mode hot
 
 # Start
 llmctl server start
@@ -21,12 +32,21 @@ llmctl server start
 # Now point any OpenAI client at http://localhost:8765/v1
 ```
 
-`llmctl local install-server` and `llmctl local install-gpu-server` are kept as
-compatibility aliases for the local CLI flow. The GPU path uses CUDA when an
-NVIDIA CUDA toolchain is present, HIP when ROCm/HIP is present, Vulkan as the
-Linux fallback, and Metal on Apple Silicon/macOS. Installs and reinstalls refresh
-the config, service unit, local model cache, and running service, then print
-`Waiting for services to finish installation` while the endpoint comes up.
+`llmctl` is the server-side model delivery layer. It binds the OpenAI-compatible
+endpoint to `0.0.0.0:8765` by default so external clients, Milliways, and tools
+such as Agentic QE can connect with `OPENAI_BASE_URL=http://<host>:8765/v1`.
+Installers default to an 80% resource budget for model serving: roughly 80% of
+GPU VRAM, 80% of RAM, and 80% of CPU threads, leaving headroom for the OS,
+llama-server, swap routing, and other clients. Override with
+`--resource-budget 0.70` or similar.
+
+`llmctl local install-server`, `llmctl local install-gpu-server`, and
+`llmctl local install-swap` are compatibility aliases for local CLI flows. The
+GPU path uses CUDA when an NVIDIA CUDA toolchain is present, HIP when ROCm/HIP is
+present, Vulkan as the Linux fallback, and Metal on Apple Silicon/macOS. Installs
+and reinstalls refresh the config, service unit, local model cache, and running
+service, then print `Waiting for services to finish installation` while the
+endpoint comes up.
 
 ## Deployment Modes
 
@@ -208,6 +228,19 @@ For OpenTelemetry export (e.g. to Grafana / Tempo):
 llmctl config set otel.endpoint http://localhost:4318
 llmctl config set otel.service_name my-llm-service
 ```
+
+Model-serving observability is available through `llmctl observe`:
+
+```bash
+llmctl observe snapshot
+llmctl observe usage --model qwen3-8b --input-tokens 1200 --output-tokens 340 --latency-ms 1800
+llmctl observe drift --model qwen3-8b --baseline "expected answer" --sample "actual answer"
+llmctl observe show --since 24h
+```
+
+These commands persist OS/runtime operations telemetry, token/latency/cost usage,
+and AI drift scores in the local SQLite metrics DB and emit OpenTelemetry when
+`otel.endpoint` is configured.
 
 ## European Models — Devstral and Mistral AI
 

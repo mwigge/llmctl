@@ -1,8 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -101,22 +109,184 @@ func newModelSearchCmd() *cobra.Command {
 
 func newModelInstallCmd() *cobra.Command {
 	var (
-		quant string
-		alias string
+		quant     string
+		alias     string
+		copyLocal bool
+		force     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "install <repo-or-name>",
-		Short: "download and register a model",
+		Short: "install a model from a local GGUF, URL, HF repo, or catalog name",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(), "install %s quant=%s alias=%s — not yet implemented\n",
-				args[0], quant, alias)
+			cfgPath := configPathFromFlags(cmd)
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				cfg = config.DefaultConfig()
+			}
+			installed, err := installModelSource(cmd, args[0], quant, alias, copyLocal, force)
+			if err != nil {
+				return err
+			}
+			cfg.Models = upsertModelRef(cfg.Models, config.ModelRef{
+				Alias: installed.Alias,
+				Path:  installed.Path,
+				Role:  "code",
+			})
+			if err := config.Save(cfg, cfgPath); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "[ok] %s -> %s\n", installed.Alias, installed.Path)
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&quant, "quant", "Q", "Q4_K_M", "quantisation level")
 	cmd.Flags().StringVarP(&alias, "alias", "A", "", "local alias for the model")
+	cmd.Flags().BoolVar(&copyLocal, "copy", false, "copy a local GGUF into llmctl's model cache instead of registering it in place")
+	cmd.Flags().BoolVar(&force, "force", false, "redownload or overwrite cached model file")
 	return cmd
+}
+
+type installedModelRef struct {
+	Alias string
+	Path  string
+	Repo  string
+	Quant string
+}
+
+func installModelSource(cmd *cobra.Command, source, quant, alias string, copyLocal, force bool) (installedModelRef, error) {
+	if alias == "" {
+		alias = deriveModelAlias(source)
+	}
+	modelDir, err := localModelDir()
+	if err != nil {
+		return installedModelRef{}, err
+	}
+	if err := os.MkdirAll(modelDir, 0o755); err != nil {
+		return installedModelRef{}, fmt.Errorf("create model cache: %w", err)
+	}
+
+	if path, ok := localGGUFPath(source); ok {
+		target := path
+		if copyLocal {
+			target = filepath.Join(modelDir, filepath.Base(path))
+			if err := copyFile(path, target, 0o644); err != nil {
+				return installedModelRef{}, fmt.Errorf("copy local model: %w", err)
+			}
+		}
+		return installedModelRef{Alias: alias, Path: target, Quant: quant}, nil
+	}
+
+	if isHTTPURL(source) {
+		path, err := downloadURL(context.Background(), source, modelDir, force, cmd.ErrOrStderr())
+		if err != nil {
+			return installedModelRef{}, err
+		}
+		return installedModelRef{Alias: alias, Path: path, Repo: source, Quant: quant}, nil
+	}
+
+	repo := source
+	if entry, ok := catalogEntryByName(source); ok {
+		repo = entry.Repo
+		if quant == "" {
+			quant = entry.Quant
+		}
+		if alias == "" {
+			alias = strings.ToLower(entry.Name)
+		}
+	}
+	if quant == "" {
+		quant = "Q4_K_M"
+	}
+	path, err := model.Download(context.Background(), model.DownloadOptions{
+		Repo:     repo,
+		Quant:    quant,
+		Alias:    alias,
+		DestDir:  modelDir,
+		HFToken:  os.Getenv("HF_TOKEN"),
+		Force:    force,
+		Progress: cmd.ErrOrStderr(),
+	})
+	if err != nil {
+		return installedModelRef{}, err
+	}
+	return installedModelRef{Alias: alias, Path: path, Repo: repo, Quant: quant}, nil
+}
+
+func localGGUFPath(source string) (string, bool) {
+	if source == "" || isHTTPURL(source) {
+		return "", false
+	}
+	if info, err := os.Stat(source); err == nil && !info.IsDir() {
+		abs, _ := filepath.Abs(source)
+		return abs, true
+	}
+	return "", false
+}
+
+func isHTTPURL(source string) bool {
+	u, err := url.Parse(source)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+func downloadURL(ctx context.Context, source, modelDir string, force bool, progress io.Writer) (string, error) {
+	u, err := url.Parse(source)
+	if err != nil {
+		return "", err
+	}
+	name := filepath.Base(u.Path)
+	if name == "." || name == "/" || name == "" {
+		name = "model-" + fmt.Sprint(time.Now().Unix()) + ".gguf"
+	}
+	dest := filepath.Join(modelDir, name)
+	if !force {
+		if info, err := os.Stat(dest); err == nil && info.Size() > 50*1024*1024 {
+			return dest, nil
+		}
+	}
+	args := []string{"-fL", "-C", "-", "-o", dest, source}
+	c := exec.Command("curl", args...)
+	c.Stderr = progress
+	if err := c.Run(); err != nil {
+		return "", fmt.Errorf("download %s: %w", source, err)
+	}
+	return dest, nil
+}
+
+func deriveModelAlias(source string) string {
+	for _, entry := range model.BuiltinCatalog {
+		if strings.EqualFold(source, entry.Name) || strings.EqualFold(source, entry.Repo) {
+			return strings.ToLower(entry.Name)
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
+	base = strings.TrimSuffix(base, "-GGUF")
+	base = strings.TrimSuffix(base, "-Q4_K_M")
+	if base == "." || base == "" {
+		return "local"
+	}
+	return strings.ToLower(base)
+}
+
+func catalogEntryByName(name string) (model.CatalogEntry, bool) {
+	lower := strings.ToLower(name)
+	for _, entry := range model.BuiltinCatalog {
+		if strings.ToLower(entry.Name) == lower || strings.ToLower(entry.Repo) == lower {
+			return entry, true
+		}
+	}
+	return model.CatalogEntry{}, false
+}
+
+func upsertModelRef(models []config.ModelRef, ref config.ModelRef) []config.ModelRef {
+	out := append([]config.ModelRef(nil), models...)
+	for i := range out {
+		if out[i].Alias == ref.Alias {
+			out[i] = ref
+			return out
+		}
+	}
+	return append([]config.ModelRef{ref}, out...)
 }
 
 func newModelRemoveCmd() *cobra.Command {

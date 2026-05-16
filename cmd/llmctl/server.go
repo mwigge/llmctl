@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,10 +26,56 @@ func newServerCmd(cfgPath *string) *cobra.Command {
 		newServerPortCmd(cfgPath),
 		newServerInstallCmd(),
 		newServerInstallGPUCmd(),
+		newServerInstallSwapCmd(cfgPath),
 		newServerUninstallCmd(),
 		newServerServiceCmd(),
 	)
 	return cmd
+}
+
+func newServerInstallSwapCmd(cfgPath *string) *cobra.Command {
+	var mode string
+	cmd := &cobra.Command{
+		Use:   "install-swap",
+		Short: "configure model swap serving in hot or cold mode",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mode = strings.ToLower(mode)
+			switch mode {
+			case "hot":
+				return configureSwapMode(cmd, *cfgPath, "hot-swap")
+			case "cold":
+				return configureSwapMode(cmd, *cfgPath, "cold-swap")
+			default:
+				return fmt.Errorf("--mode must be hot or cold")
+			}
+		},
+	}
+	cmd.Flags().StringVar(&mode, "mode", "cold", "swap mode: cold|hot")
+	return cmd
+}
+
+func configureSwapMode(cmd *cobra.Command, cfgPath, mode string) error {
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	cfg.Mode = mode
+	if cfg.Server.Host == "" || cfg.Server.Host == "127.0.0.1" {
+		cfg.Server.Host = "0.0.0.0"
+	}
+	if err := config.Save(cfg, cfgPath); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+	if _, err := server.WriteServiceFile(cfg); err == nil {
+		_ = runInstallCtl(cmd.OutOrStdout(), cmd.ErrOrStderr(), "systemctl", "--user", "daemon-reload")
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "[ok] configured %s model serving\n", mode)
+	fmt.Fprintln(cmd.OutOrStdout(), "==> Waiting for services to finish installation...")
+	if runtime.GOOS == "linux" {
+		_ = runInstallCtl(cmd.OutOrStdout(), cmd.ErrOrStderr(), "systemctl", "--user", "enable", "--now", server.ServiceName())
+		_ = runInstallCtl(cmd.OutOrStdout(), cmd.ErrOrStderr(), "systemctl", "--user", "restart", server.ServiceName())
+	}
+	return nil
 }
 
 func loadConfig(cfgPath string) (*config.Config, error) {
@@ -169,6 +216,7 @@ func newServerInstallCmd() *cobra.Command {
 		gpu    bool
 		dryRun bool
 		accel  string
+		budget float64
 	)
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -179,12 +227,14 @@ func newServerInstallCmd() *cobra.Command {
 				GPU:        gpu,
 				DryRun:     dryRun,
 				Accel:      accel,
+				Budget:     budget,
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&gpu, "gpu", false, "detect GPU and install the largest fitting curated model")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the selected hardware/model plan without changing files")
 	cmd.Flags().StringVar(&accel, "accel", "auto", "GPU acceleration: auto|vulkan|cuda|hip")
+	cmd.Flags().Float64Var(&budget, "resource-budget", 0.80, "fraction of CPU/RAM/GPU memory available for model serving")
 	return cmd
 }
 
@@ -192,6 +242,7 @@ func newServerInstallGPUCmd() *cobra.Command {
 	var (
 		dryRun bool
 		accel  string
+		budget float64
 	)
 	cmd := &cobra.Command{
 		Use:   "install-gpu",
@@ -202,11 +253,13 @@ func newServerInstallGPUCmd() *cobra.Command {
 				GPU:        true,
 				DryRun:     dryRun,
 				Accel:      accel,
+				Budget:     budget,
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the selected hardware/model plan without changing files")
 	cmd.Flags().StringVar(&accel, "accel", "auto", "GPU acceleration: auto|vulkan|cuda|hip")
+	cmd.Flags().Float64Var(&budget, "resource-budget", 0.80, "fraction of CPU/RAM/GPU memory available for model serving")
 	return cmd
 }
 
