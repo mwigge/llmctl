@@ -24,6 +24,7 @@ func newServerCmd(cfgPath *string) *cobra.Command {
 		newServerStatusCmd(cfgPath),
 		newServerPortCmd(cfgPath),
 		newServerInstallCmd(),
+		newServerInstallGPUCmd(),
 		newServerUninstallCmd(),
 		newServerServiceCmd(),
 	)
@@ -54,15 +55,14 @@ func newServerStartCmd(cfgPath *string) *cobra.Command {
 			if mode != "" {
 				cfg.Mode = mode
 			}
+			if foreground {
+				return server.RunForeground(context.Background(), cfg)
+			}
 			mgr := server.NewManager(cfg)
 			if err := mgr.Start(context.Background()); err != nil {
 				return fmt.Errorf("start server: %w", err)
 			}
-			if foreground {
-				fmt.Fprintln(cmd.OutOrStdout(), "server running (foreground mode — press Ctrl-C to stop)")
-			} else {
-				fmt.Fprintln(cmd.OutOrStdout(), "server started")
-			}
+			fmt.Fprintln(cmd.OutOrStdout(), "server started")
 			return nil
 		},
 	}
@@ -165,14 +165,49 @@ func newServerPortCmd(cfgPath *string) *cobra.Command {
 }
 
 func newServerInstallCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		gpu    bool
+		dryRun bool
+		accel  string
+	)
+	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "install the llama-server binary",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "llama-server installation is not yet implemented")
-			return nil
+			return installLocalServer(cmd, serverInstallOptions{
+				ConfigPath: configPathFromFlags(cmd),
+				GPU:        gpu,
+				DryRun:     dryRun,
+				Accel:      accel,
+			})
 		},
 	}
+	cmd.Flags().BoolVar(&gpu, "gpu", false, "detect GPU and install the largest fitting curated model")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the selected hardware/model plan without changing files")
+	cmd.Flags().StringVar(&accel, "accel", "auto", "GPU acceleration: auto|vulkan|cuda|hip")
+	return cmd
+}
+
+func newServerInstallGPUCmd() *cobra.Command {
+	var (
+		dryRun bool
+		accel  string
+	)
+	cmd := &cobra.Command{
+		Use:   "install-gpu",
+		Short: "install llama-server using detected GPU hardware",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return installLocalServer(cmd, serverInstallOptions{
+				ConfigPath: configPathFromFlags(cmd),
+				GPU:        true,
+				DryRun:     dryRun,
+				Accel:      accel,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the selected hardware/model plan without changing files")
+	cmd.Flags().StringVar(&accel, "accel", "auto", "GPU acceleration: auto|vulkan|cuda|hip")
+	return cmd
 }
 
 func newServerUninstallCmd() *cobra.Command {

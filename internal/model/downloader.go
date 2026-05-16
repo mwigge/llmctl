@@ -65,8 +65,8 @@ func Download(ctx context.Context, opts DownloadOptions) (string, error) {
 		}
 	}
 
-	// Build GGUF filename for URL construction.
-	ggufFile := opts.Quant + ".gguf"
+	base := strings.TrimSuffix(filepath.Base(opts.Repo), "-GGUF")
+	ggufFile := base + "-" + opts.Quant + ".gguf"
 
 	// Mirror list, tried in order.
 	mirrors := []string{

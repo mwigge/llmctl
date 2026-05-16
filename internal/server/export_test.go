@@ -51,7 +51,7 @@ func FetchModels(ctx context.Context, endpoint string) []string {
 
 // BuildArgv exposes the singleManager's buildArgv for testing.
 func BuildArgv(cfg *config.Config) []string {
-	return newSingleManager(cfg).buildArgv()
+	return BuildLlamaServerArgs(cfg)
 }
 
 // BuildParallelArgv exposes buildParallelArgv for testing.

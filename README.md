@@ -9,20 +9,24 @@ with a single CLI. OpenAI-compatible API — any client that speaks `/v1` works.
 # Install
 curl -sSf https://github.com/mwigge/llmctl/releases/latest/download/install.sh | bash
 
-# Download the default model — Devstral-Small (12 GB, needs 16 GB RAM)
-llmctl model install Devstral-Small
-
-# Or a lighter 8 GB model for machines with less RAM
-llmctl model install Hermes-3-Llama-3.1-8B
-
-# Install the inference server
+# Install or refresh the inference server and default local model
 llmctl server install
+
+# Or let llmctl detect NVIDIA, AMD, or macOS GPU memory and pick a model
+llmctl server install-gpu
 
 # Start
 llmctl server start
 
 # Now point any OpenAI client at http://localhost:8765/v1
 ```
+
+`llmctl local install-server` and `llmctl local install-gpu-server` are kept as
+compatibility aliases for the local CLI flow. The GPU path uses CUDA when an
+NVIDIA CUDA toolchain is present, HIP when ROCm/HIP is present, Vulkan as the
+Linux fallback, and Metal on Apple Silicon/macOS. Installs and reinstalls refresh
+the config, service unit, local model cache, and running service, then print
+`Waiting for services to finish installation` while the endpoint comes up.
 
 ## Deployment Modes
 

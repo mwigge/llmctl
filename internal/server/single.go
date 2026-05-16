@@ -53,7 +53,7 @@ func (m *singleManager) Start(ctx context.Context) error {
 		return fmt.Errorf("start: %w", err)
 	}
 
-	args := m.buildArgv()
+	args := BuildLlamaServerArgs(m.cfg)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
@@ -144,8 +144,8 @@ func (m *singleManager) Restart(ctx context.Context) error {
 }
 
 // buildArgv constructs the argument slice for llama-server.
-func (m *singleManager) buildArgv() []string {
-	cfg := m.cfg
+// BuildLlamaServerArgs constructs the llama-server argument slice for cfg.
+func BuildLlamaServerArgs(cfg *config.Config) []string {
 	var args []string
 
 	if len(cfg.Models) > 0 {

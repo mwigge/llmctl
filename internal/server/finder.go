@@ -26,7 +26,7 @@ func localBin() string {
 
 // findBinary searches wellKnownDirs, ~/.local/bin, then PATH for name.
 func findBinary(name string) (string, error) {
-	dirs := append(wellKnownDirs, localBin()) //nolint:gocritic // intentional new slice
+	dirs := append([]string{localBin()}, wellKnownDirs...) //nolint:gocritic // intentional new slice
 	for _, dir := range dirs {
 		if dir == "" {
 			continue

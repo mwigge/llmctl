@@ -21,6 +21,7 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(
 		newServerCmd(&cfgPath),
+		newLocalCmd(&cfgPath),
 		newModelCmd(),
 		newConfigCmd(&cfgPath),
 		newMetricsCmd(&cfgPath),

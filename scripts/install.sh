@@ -98,6 +98,17 @@ info "Installed ${BINARY_NAME} to ${DEST}"
 info "Initialising default configuration..."
 "${DEST}" config init 2>/dev/null || true
 
+# Refresh services on install, upgrade, or reinstall. This keeps the local
+# server using the freshly installed llmctl binary and updated config handling.
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  if systemctl --user list-unit-files llmctl-server.service >/dev/null 2>&1; then
+    info "Restarting llmctl local server service..."
+    systemctl --user enable --now llmctl-server.service >/dev/null 2>&1 || true
+    systemctl --user restart llmctl-server.service >/dev/null 2>&1 || true
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # next steps
 # ---------------------------------------------------------------------------
@@ -111,6 +122,9 @@ llmctl is ready. Next steps:
 
   2. Install the llama.cpp server:
        llmctl server install
+
+     Or install with GPU-aware model selection:
+       llmctl server install-gpu
 
   3. Start the server:
        llmctl server start
